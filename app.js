@@ -80,20 +80,14 @@ function setDefaultDates() {
   $('#dateTo').value = state.to;
 }
 
-async function apiWarehouse() {
-  const endpoint = cfg.warehouse?.endpoint || '/api/warehouse';
-  const body = {
-    dateFrom: state.from,
-    dateTo: state.to,
-    storeIds: [cfg.warehouse.storeId]
-  };
+async function apiStoreBalance() {
+  const endpoint = cfg.storeBalance?.endpoint || '/api/store-balance';
 
   const res = await fetch(`${cfg.workerUrl}${endpoint}`, {
-    method: 'POST',
+    method: 'GET',
     headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
+      'Accept': 'application/json'
+    }
   });
 
   const responseText = await res.text();
@@ -112,45 +106,56 @@ async function apiWarehouse() {
   return payload;
 }
 
-function transformWarehouse(payload) {
-  const storeId = String(cfg.warehouse.storeId);
-  const products = (payload.products || []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    sku: p.code || p.num || '',
-    code: p.code || '',
-    num: p.num || '',
-    unit: p.unit || '',
-    category: p.category || '',
-    productType: p.productType || '',
-    deleted: Boolean(p.deleted)
+function transformStoreBalance(payload) {
+  const storages = (payload.storages || []).filter((s) => !s.deleted);
+  const stores = storages.map((s) => ({
+    id: s.id,
+    name: s.name,
+    type: s.type || ''
   }));
 
-  const balances = (payload.products || []).map((p) => {
-    const quantity = Number(p.openingQty || 0);
-    const amount = Number(p.openingAmount || 0);
-    const cost = quantity !== 0 ? amount / quantity : 0;
+  const productsById = new Map();
+  const balances = [];
 
-    return {
-      productId: p.id,
-      storeId,
-      quantity,
-      amount,
-      cost
-    };
-  });
+  for (const storage of storages) {
+    for (const p of (storage.products || [])) {
+      if (!productsById.has(p.id)) {
+        productsById.set(p.id, {
+          id: p.id,
+          name: p.name,
+          sku: p.code || p.num || '',
+          code: p.code || '',
+          num: p.num || '',
+          unit: p.unit || '',
+          category: p.category || '',
+          productType: p.productType || '',
+          deleted: Boolean(p.deleted)
+        });
+      }
+
+      balances.push({
+        productId: p.id,
+        storeId: storage.id,
+        quantity: Number(p.quantity || 0),
+        amount: Number(p.amount || 0),
+        cost: Number(p.costPrice || 0),
+        consumptionForecast: Number(p.consumptionForecast || 0),
+        suggestedQty: Number(p.suggestedQty || 0)
+      });
+    }
+  }
 
   return {
-    stores: [{ id: storeId, name: cfg.warehouse.storeName || `Склад ${storeId}` }],
-    products,
+    stores,
+    products: [...productsById.values()],
     balances,
     documents: [],
     inventories: [],
     dishes: [],
     movements: [],
     meta: {
-      source: 'iikoWeb',
-      productCount: payload.summary?.productCount ?? products.length,
+      source: 'iikoWeb store-balance',
+      storageCount: payload.storageCount ?? stores.length,
       version: payload.version || ''
     }
   };
@@ -161,16 +166,15 @@ async function loadAll() {
   state.loading = true;
   $('#refreshBtn').disabled = true;
   $('#connectionStatus').textContent = 'Загрузка данных…';
-  $('#content').innerHTML = '<div class="loading">Получаем данные из iikoWeb…</div>';
+  $('#content').innerHTML = '<div class="loading">Получаем текущие остатки из iikoWeb…</div>';
   $('#summary').innerHTML = '';
 
   try {
     if (cfg.demoMode) {
       state.data = structuredClone(demoData);
     } else {
-      if (!state.from || !state.to) setDefaultDates();
-      const raw = await apiWarehouse();
-      state.data = transformWarehouse(raw);
+      const raw = await apiStoreBalance();
+      state.data = transformStoreBalance(raw);
     }
 
     fillStores();
@@ -193,17 +197,19 @@ async function loadAll() {
 
 function fillStores() {
   const select = $('#storeFilter');
-  const previous = select.value;
+  const previous = state.storeId || select.value;
   const stores = state.data?.stores || [];
+
   select.innerHTML = '<option value="">Все склады</option>' + stores
     .map((s) => `<option value="${esc(s.id)}">${escapeHtml(s.name)}</option>`)
     .join('');
 
   if (stores.some((s) => String(s.id) === String(previous))) {
     select.value = previous;
-  } else if (!cfg.demoMode && stores.length === 1) {
-    select.value = String(stores[0].id);
-    state.storeId = String(stores[0].id);
+    state.storeId = previous;
+  } else {
+    select.value = '';
+    state.storeId = '';
   }
 }
 
@@ -246,7 +252,7 @@ function renderNotConnected() {
   $('#content').innerHTML = `
     <div class="empty">
       <b>${escapeHtml(names[state.tab] || 'Раздел')} пока не подключён к реальным данным.</b><br><br>
-      Сейчас реально работает раздел <b>«Остатки»</b>. Остальные разделы подключим следующими и не будем подменять их демо-данными.
+      Сейчас реально работает раздел <b>«Остатки»</b>. Остальные разделы подключим следующими.
     </div>`;
 }
 
@@ -265,17 +271,18 @@ function renderBalances() {
     ));
 
   const totalAmount = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const nonZero = rows.filter((x) => Number(x.quantity || 0) !== 0);
 
   metrics([
-    ['Позиций', fmt.format(rows.length)],
-    ['Количество', fmt.format(rows.reduce((s, x) => s + Number(x.quantity || 0), 0))],
-    ['Стоимость', money.format(totalAmount)],
-    ['Отрицательных', fmt.format(rows.filter((x) => x.quantity < 0).length)]
+    ['Складов', state.storeId ? 1 : state.data.stores.length],
+    ['Позиций', fmt.format(nonZero.length)],
+    ['Количество', fmt.format(nonZero.reduce((s, x) => s + Number(x.quantity || 0), 0))],
+    ['Стоимость', money.format(totalAmount)]
   ]);
 
   $('#content').innerHTML = `
     <div class="muted" style="padding:0 0 12px 0">
-      Реальные данные iikoWeb. Сейчас показан начальный остаток за выбранный период.
+      Текущие остатки iikoWeb. Поле «Остаток» = amount из store-balance, «Сумма» = sum.
     </div>
     ${table(
       ['Товар', 'Код', 'Категория', 'Склад', 'Остаток', 'Ед.', 'Себестоимость', 'Сумма'],
@@ -286,14 +293,12 @@ function renderBalances() {
         <td>${escapeHtml(nameBy(state.data.stores, x.storeId))}</td>
         <td class="${x.quantity < 0 ? 'negative' : ''}">${fmt.format(x.quantity)}</td>
         <td>${escapeHtml(x.product?.unit || '')}</td>
-        <td>${x.quantity !== 0 ? money.format(x.cost || 0) : '—'}</td>
+        <td>${money.format(x.cost || 0)}</td>
         <td class="${x.amount < 0 ? 'negative' : ''}">${money.format(x.amount || 0)}</td>
       </tr>`)
     )}`;
 }
 
-// Ниже остаются demo-renderers. В live-режиме они не вызываются,
-// пока соответствующие iikoWeb endpoints не будут подключены.
 function renderDocuments() {
   const rows = state.data.documents.filter((x) =>
     (!state.storeId || x.storeId === state.storeId) &&
@@ -356,16 +361,16 @@ $('#searchInput').oninput = (e) => {
   render();
 };
 
-$('#dateFrom').onchange = async (e) => {
+// Даты пока оставляем для будущих документов/ОСВ.
+// На текущий endpoint store-balance они не влияют.
+$('#dateFrom').onchange = (e) => {
   state.from = e.target.value;
-  if (!cfg.demoMode) await loadAll();
-  else render();
+  render();
 };
 
-$('#dateTo').onchange = async (e) => {
+$('#dateTo').onchange = (e) => {
   state.to = e.target.value;
-  if (!cfg.demoMode) await loadAll();
-  else render();
+  render();
 };
 
 const tg = window.Telegram?.WebApp;
