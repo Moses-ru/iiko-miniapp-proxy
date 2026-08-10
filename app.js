@@ -1,5 +1,8 @@
 const cfg = window.APP_CONFIG || {};
 
+const LOCAL_CACHE_KEY = 'iiko-miniapp:store-balance:v2';
+const LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 const state = {
   tab: 'balances',
   data: null,
@@ -10,7 +13,8 @@ const state = {
   to: '',
   loading: false,
   page: 1,
-  pageSize: 30
+  pageSize: 30,
+  lastUpdatedAt: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -115,11 +119,15 @@ function metrics(items) {
   `).join('');
 }
 
-async function apiStoreBalance() {
+async function apiStoreBalance({ forceRefresh = false } = {}) {
   const endpoint = cfg.storeBalanceEndpoint || '/api/store-balance';
+  const suffix = forceRefresh
+    ? `${endpoint.includes('?') ? '&' : '?'}refresh=1&_=${Date.now()}`
+    : endpoint;
 
-  const response = await fetch(`${cfg.workerUrl}${endpoint}`, {
+  const response = await fetch(`${cfg.workerUrl}${suffix}`, {
     method: 'GET',
+    cache: 'no-store',
     headers: {
       Accept: 'application/json'
     }
@@ -139,6 +147,70 @@ async function apiStoreBalance() {
   }
 
   return payload;
+}
+
+function saveLocalCache(raw) {
+  try {
+    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
+      savedAt: Date.now(),
+      raw
+    }));
+  } catch (error) {
+    console.warn('LOCAL CACHE: save failed', error);
+  }
+}
+
+function readLocalCache() {
+  try {
+    const value = localStorage.getItem(LOCAL_CACHE_KEY);
+    if (!value) return null;
+
+    const parsed = JSON.parse(value);
+    if (!parsed?.raw || !parsed?.savedAt) return null;
+
+    if (Date.now() - parsed.savedAt > LOCAL_CACHE_MAX_AGE_MS) {
+      localStorage.removeItem(LOCAL_CACHE_KEY);
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    console.warn('LOCAL CACHE: read failed', error);
+    return null;
+  }
+}
+
+function formatUpdatedTime(value) {
+  const date = value ? new Date(value) : new Date();
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  return date.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function applyRawData(raw, { local = false } = {}) {
+  state.data = transformStoreBalance(raw);
+  state.lastUpdatedAt = raw.updatedAt || new Date().toISOString();
+
+  fillStores();
+  render();
+
+  if (local) {
+    $('#connectionStatus').textContent =
+      `Сохранённые данные · ${formatUpdatedTime(state.lastUpdatedAt)} · обновляем…`;
+  } else {
+    const cacheLabel = raw.cached ? 'кэш' : 'iikoWeb';
+    $('#connectionStatus').textContent =
+      `${cacheLabel} · обновлено ${formatUpdatedTime(state.lastUpdatedAt)}`;
+  }
 }
 
 function transformStoreBalance(payload) {
@@ -192,41 +264,72 @@ function transformStoreBalance(payload) {
   };
 }
 
-async function loadAll() {
+async function loadAll({ forceRefresh = false, keepVisible = false } = {}) {
   if (state.loading) return;
 
   state.loading = true;
   $('#refreshBtn').disabled = true;
-  $('#connectionStatus').textContent = 'Загрузка данных…';
-  $('#summary').innerHTML = '';
-  $('#content').innerHTML = '<div class="loading">Получаем данные из iikoWeb…</div>';
+
+  if (!keepVisible || !state.data) {
+    $('#connectionStatus').textContent = 'Загрузка данных…';
+    $('#summary').innerHTML = '';
+    $('#content').innerHTML = '<div class="loading">Получаем данные из iikoWeb…</div>';
+  } else {
+    $('#connectionStatus').textContent = 'Обновляем данные…';
+  }
 
   try {
-    const raw = await apiStoreBalance();
-    state.data = transformStoreBalance(raw);
-    fillStores();
-    render();
+    const raw = await apiStoreBalance({ forceRefresh });
 
-    $('#connectionStatus').textContent =
-      `iikoWeb · обновлено ${new Date().toLocaleTimeString('ru-RU', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })}`;
+    saveLocalCache(raw);
+    applyRawData(raw);
+
+    if (forceRefresh) {
+      toast('Данные обновлены');
+    }
   } catch (error) {
     console.error(error);
-    $('#connectionStatus').textContent = 'Ошибка подключения';
-    $('#summary').innerHTML = '';
-    $('#content').innerHTML = `
-      <div class="empty-state">
-        <strong>Не удалось получить данные из iikoWeb</strong>
-        ${escapeHtml(error.message)}
-      </div>
-    `;
-    toast(error.message);
+
+    if (state.data) {
+      $('#connectionStatus').textContent =
+        `Сохранённые данные · ${formatUpdatedTime(state.lastUpdatedAt)}`;
+      toast(`Не удалось обновить: ${error.message}`);
+    } else {
+      $('#connectionStatus').textContent = 'Ошибка подключения';
+      $('#summary').innerHTML = '';
+      $('#content').innerHTML = `
+        <div class="empty-state">
+          <strong>Не удалось получить данные из iikoWeb</strong>
+          ${escapeHtml(error.message)}
+        </div>
+      `;
+      toast(error.message);
+    }
   } finally {
     state.loading = false;
     $('#refreshBtn').disabled = false;
   }
+}
+
+function startFastLoad() {
+  const cached = readLocalCache();
+
+  if (cached?.raw) {
+    try {
+      applyRawData(cached.raw, { local: true });
+
+      // Показываем сохранённые остатки сразу, свежие подтягиваем в фоне.
+      loadAll({ forceRefresh: false, keepVisible: true });
+      return;
+    } catch (error) {
+      console.warn('LOCAL CACHE: invalid data', error);
+      try {
+        localStorage.removeItem(LOCAL_CACHE_KEY);
+      } catch {}
+    }
+  }
+
+  loadAll();
 }
 
 function fillStores() {
@@ -463,7 +566,9 @@ $$('.menu-item').forEach((button) => {
   button.addEventListener('click', () => setTab(button.dataset.tab));
 });
 
-$('#refreshBtn').addEventListener('click', loadAll);
+$('#refreshBtn').addEventListener('click', () => {
+  loadAll({ forceRefresh: true, keepVisible: true });
+});
 
 $('#storeFilter').addEventListener('change', (event) => {
   state.storeId = event.target.value;
@@ -523,4 +628,4 @@ if (tg) {
 }
 
 setDefaultDates();
-loadAll();
+startFastLoad();
