@@ -1,48 +1,112 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#ffffff" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f7fb">
   <title>iiko Склад</title>
-  <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
-  <link rel="stylesheet" href="./styles.css" />
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <header class="app-header">
-    <div>
-      <h1>iiko Склад</h1>
-      <p id="connectionStatus" class="muted">Подготовка…</p>
+  <div id="menuBackdrop" class="menu-backdrop" hidden></div>
+
+  <aside id="sideMenu" class="side-menu" aria-hidden="true">
+    <div class="side-menu__header">
+      <div>
+        <div class="side-menu__eyebrow">iiko Склад</div>
+        <strong>Разделы</strong>
+      </div>
+      <button id="closeMenuBtn" class="icon-button" type="button" aria-label="Закрыть меню">×</button>
     </div>
-    <button id="refreshBtn" class="primary">Обновить</button>
+
+    <nav class="side-menu__nav" aria-label="Разделы приложения">
+      <button class="menu-item active" type="button" data-tab="balances">
+        <span class="menu-item__icon">▦</span>
+        <span>Остатки</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="documents">
+        <span class="menu-item__icon">▤</span>
+        <span>Документы</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="inventories">
+        <span class="menu-item__icon">✓</span>
+        <span>Инвентаризации</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="dishes">
+        <span class="menu-item__icon">◫</span>
+        <span>Блюда</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="turnover">
+        <span class="menu-item__icon">▥</span>
+        <span>ОСВ</span>
+      </button>
+    </nav>
+  </aside>
+
+  <header class="app-header">
+    <button id="menuBtn" class="menu-button" type="button" aria-label="Открыть меню" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+
+    <div class="brand">
+      <div class="brand__mark">□</div>
+      <div class="brand__text">
+        <h1 id="pageTitle">iiko Склад</h1>
+        <p id="connectionStatus">Подключение…</p>
+      </div>
+    </div>
+
+    <button id="refreshBtn" class="refresh-button" type="button">
+      <span class="refresh-button__icon">↻</span>
+      <span class="refresh-button__text">Обновить</span>
+    </button>
   </header>
 
-  <main>
-    <section class="filters card">
-      <label>Склад<select id="storeFilter"><option value="">Все склады</option></select></label>
-      <label>Поиск<input id="searchInput" type="search" placeholder="Товар, документ, блюдо" /></label>
-      <label>С даты<input id="dateFrom" type="date" /></label>
-      <label>По дату<input id="dateTo" type="date" /></label>
+  <main class="app-main">
+    <section id="balanceControls" class="controls-panel">
+      <div class="controls-row">
+        <label class="field field--store">
+          <span class="field__label">Склад</span>
+          <select id="storeFilter">
+            <option value="">Все склады</option>
+          </select>
+        </label>
+
+        <label class="search-field">
+          <span class="search-field__icon">⌕</span>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="Товар, код, категория">
+        </label>
+      </div>
+
+      <div class="filter-chips" role="group" aria-label="Фильтр остатков">
+        <button class="filter-chip active" type="button" data-balance-filter="all">Все</button>
+        <button class="filter-chip" type="button" data-balance-filter="stock">Только с остатком</button>
+        <button class="filter-chip filter-chip--danger" type="button" data-balance-filter="negative">Отрицательные</button>
+      </div>
     </section>
 
-    <nav class="tabs" aria-label="Разделы">
-      <button class="tab active" data-tab="balances">Остатки</button>
-      <button class="tab" data-tab="documents">Документы</button>
-      <button class="tab" data-tab="inventories">Инвентаризации</button>
-      <button class="tab" data-tab="dishes">Блюда</button>
-      <button class="tab" data-tab="turnover">ОСВ</button>
-    </nav>
+    <section id="periodControls" class="period-panel" hidden>
+      <label class="field">
+        <span class="field__label">С даты</span>
+        <input id="dateFrom" type="date">
+      </label>
+      <label class="field">
+        <span class="field__label">По дату</span>
+        <input id="dateTo" type="date">
+      </label>
+    </section>
 
-    <section id="summary" class="summary-grid"></section>
-    <section id="content" class="card table-card"></section>
+    <section id="summary" class="summary-grid" aria-live="polite"></section>
+
+    <section id="content" class="content-panel">
+      <div class="loading">Получаем данные из iikoWeb…</div>
+    </section>
   </main>
 
-  <dialog id="detailsDialog">
-    <form method="dialog"><button class="close" aria-label="Закрыть">×</button></form>
-    <div id="detailsContent"></div>
-  </dialog>
-
   <div id="toast" class="toast" hidden></div>
+
   <script src="./config.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
