@@ -81,8 +81,7 @@ function setDefaultDates() {
 }
 
 async function apiStoreBalance() {
-  const endpoint = cfg.storeBalance?.endpoint || '/api/store-balance';
-
+  const endpoint = cfg.storeBalanceEndpoint || '/api/store-balance';
   const res = await fetch(`${cfg.workerUrl}${endpoint}`, {
     method: 'GET',
     headers: {
@@ -107,22 +106,26 @@ async function apiStoreBalance() {
 }
 
 function transformStoreBalance(payload) {
-  const storages = (payload.storages || []).filter((s) => !s.deleted);
-  const stores = storages.map((s) => ({
-    id: s.id,
-    name: s.name,
-    type: s.type || ''
-  }));
+  const stores = (payload.storages || []).
+    filter((s) => !s.deleted).
+    map((s) => ({
+      id: s.id,
+      name: s.name || 'Без названия'
+    }));
 
-  const productsById = new Map();
+  const productMap = new Map();
   const balances = [];
 
-  for (const storage of storages) {
-    for (const p of (storage.products || [])) {
-      if (!productsById.has(p.id)) {
-        productsById.set(p.id, {
+  for (const storage of payload.storages || []) {
+    if (storage.deleted) continue;
+
+    for (const p of storage.products || []) {
+      if (!p.id || p.deleted) continue;
+
+      if (!productMap.has(p.id)) {
+        productMap.set(p.id, {
           id: p.id,
-          name: p.name,
+          name: p.name || '',
           sku: p.code || p.num || '',
           code: p.code || '',
           num: p.num || '',
@@ -147,7 +150,7 @@ function transformStoreBalance(payload) {
 
   return {
     stores,
-    products: [...productsById.values()],
+    products: Array.from(productMap.values()),
     balances,
     documents: [],
     inventories: [],
@@ -166,13 +169,14 @@ async function loadAll() {
   state.loading = true;
   $('#refreshBtn').disabled = true;
   $('#connectionStatus').textContent = 'Загрузка данных…';
-  $('#content').innerHTML = '<div class="loading">Получаем текущие остатки из iikoWeb…</div>';
+  $('#content').innerHTML = '<div class="loading">Получаем данные из iikoWeb…</div>';
   $('#summary').innerHTML = '';
 
   try {
     if (cfg.demoMode) {
       state.data = structuredClone(demoData);
     } else {
+      if (!state.from || !state.to) setDefaultDates();
       const raw = await apiStoreBalance();
       state.data = transformStoreBalance(raw);
     }
@@ -197,16 +201,14 @@ async function loadAll() {
 
 function fillStores() {
   const select = $('#storeFilter');
-  const previous = state.storeId || select.value;
+  const previous = select.value;
   const stores = state.data?.stores || [];
-
   select.innerHTML = '<option value="">Все склады</option>' + stores
     .map((s) => `<option value="${esc(s.id)}">${escapeHtml(s.name)}</option>`)
     .join('');
 
   if (stores.some((s) => String(s.id) === String(previous))) {
     select.value = previous;
-    state.storeId = previous;
   } else {
     select.value = '';
     state.storeId = '';
@@ -252,7 +254,7 @@ function renderNotConnected() {
   $('#content').innerHTML = `
     <div class="empty">
       <b>${escapeHtml(names[state.tab] || 'Раздел')} пока не подключён к реальным данным.</b><br><br>
-      Сейчас реально работает раздел <b>«Остатки»</b>. Остальные разделы подключим следующими.
+      Сейчас реально работает раздел <b>«Остатки»</b>. Остальные разделы подключим следующими и не будем подменять их демо-данными.
     </div>`;
 }
 
@@ -271,18 +273,17 @@ function renderBalances() {
     ));
 
   const totalAmount = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const nonZero = rows.filter((x) => Number(x.quantity || 0) !== 0);
 
   metrics([
-    ['Складов', state.storeId ? 1 : state.data.stores.length],
-    ['Позиций', fmt.format(nonZero.length)],
-    ['Количество', fmt.format(nonZero.reduce((s, x) => s + Number(x.quantity || 0), 0))],
-    ['Стоимость', money.format(totalAmount)]
+    ['Позиций', fmt.format(rows.length)],
+    ['Количество', fmt.format(rows.reduce((s, x) => s + Number(x.quantity || 0), 0))],
+    ['Стоимость', money.format(totalAmount)],
+    ['Отрицательных', fmt.format(rows.filter((x) => x.quantity < 0).length)]
   ]);
 
   $('#content').innerHTML = `
     <div class="muted" style="padding:0 0 12px 0">
-      Текущие остатки iikoWeb. Поле «Остаток» = amount из store-balance, «Сумма» = sum.
+      Реальные текущие остатки iikoWeb. Даты сверху пока не влияют на этот раздел.
     </div>
     ${table(
       ['Товар', 'Код', 'Категория', 'Склад', 'Остаток', 'Ед.', 'Себестоимость', 'Сумма'],
@@ -293,12 +294,14 @@ function renderBalances() {
         <td>${escapeHtml(nameBy(state.data.stores, x.storeId))}</td>
         <td class="${x.quantity < 0 ? 'negative' : ''}">${fmt.format(x.quantity)}</td>
         <td>${escapeHtml(x.product?.unit || '')}</td>
-        <td>${money.format(x.cost || 0)}</td>
+        <td>${x.quantity !== 0 ? money.format(x.cost || 0) : '—'}</td>
         <td class="${x.amount < 0 ? 'negative' : ''}">${money.format(x.amount || 0)}</td>
       </tr>`)
     )}`;
 }
 
+// Ниже остаются demo-renderers. В live-режиме они не вызываются,
+// пока соответствующие iikoWeb endpoints не будут подключены.
 function renderDocuments() {
   const rows = state.data.documents.filter((x) =>
     (!state.storeId || x.storeId === state.storeId) &&
@@ -361,14 +364,12 @@ $('#searchInput').oninput = (e) => {
   render();
 };
 
-// Даты пока оставляем для будущих документов/ОСВ.
-// На текущий endpoint store-balance они не влияют.
-$('#dateFrom').onchange = (e) => {
+$('#dateFrom').onchange = async (e) => {
   state.from = e.target.value;
   render();
 };
 
-$('#dateTo').onchange = (e) => {
+$('#dateTo').onchange = async (e) => {
   state.to = e.target.value;
   render();
 };
