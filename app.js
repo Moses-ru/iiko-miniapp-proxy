@@ -19,7 +19,14 @@ const state = {
   documentsLoading: false,
   documentDetail: null,
   documentDetailLoading: false,
-  documentTypeFilter: 'all'
+  documentTypeFilter: 'all',
+  dishes: [],
+  dishesLoading: false,
+  dishTypeFilter: 'all',
+  dishDetail: null,
+  turnoverRows: [],
+  turnoverLoading: false,
+  turnoverMode: 'amount'
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -219,6 +226,65 @@ function applyRawData(raw, { local = false } = {}) {
 }
 
 
+
+async function apiDishes({ forceRefresh = false } = {}) {
+  const suffix = forceRefresh ? '?refresh=1' : '';
+  const response = await fetch(
+    `${cfg.workerUrl}/api/dishes${suffix}`,
+    { cache: 'no-store', headers: { Accept: 'application/json' } }
+  );
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok === false) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function apiDishDetail(productId) {
+  const response = await fetch(
+    `${cfg.workerUrl}/api/dish/${encodeURIComponent(productId)}`,
+    { cache: 'no-store', headers: { Accept: 'application/json' } }
+  );
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok === false) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function apiTurnover({ forceRefresh = false } = {}) {
+  const params = new URLSearchParams({
+    dateFrom: state.from,
+    dateTo: state.to
+  });
+  if (forceRefresh) params.set('refresh', '1');
+
+  const response = await fetch(
+    `${cfg.workerUrl}/api/turnover?${params.toString()}`,
+    { cache: 'no-store', headers: { Accept: 'application/json' } }
+  );
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok === false) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function ruProductType(type) {
+  const map = {
+    DISH: 'Блюдо',
+    PREPARED: 'Полуфабрикат',
+    MODIFIER: 'Модификатор',
+    GOODS: 'Товар',
+    SERVICE: 'Услуга',
+    RATE: 'Тариф'
+  };
+  return map[type] || type || 'Позиция';
+}
+
 async function apiDocuments({ forceRefresh = false } = {}) {
   const params = new URLSearchParams({
     dateFrom: state.from,
@@ -279,6 +345,17 @@ function ruDocumentStatus(doc) {
   };
 
   return map[doc?.status] || doc?.statusName || doc?.status || '';
+}
+
+function cleanUnitName(value) {
+  const text = String(value || '').trim();
+
+  // Старый iikoWeb иногда присылает ID единицы вместо её названия.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
+    return '';
+  }
+
+  return text;
 }
 
 function formatDocumentDate(value, withTime = true) {
@@ -810,7 +887,7 @@ function renderDocumentDetail() {
             </div>
             <div class="document-item__qty">
               <strong>${fmt.format(item.amount)}</strong>
-              <span>${escapeHtml(item.unitName || '')}</span>
+              <span>${escapeHtml(cleanUnitName(item.unitName))}</span>
             </div>
             <div class="document-item__cost">
               <strong>${money.format(item.costPrice || 0)}</strong>
@@ -828,6 +905,322 @@ function renderDocumentDetail() {
   $('#backToDocumentsBtn').addEventListener('click', () => {
     state.documentDetail = null;
     renderDocuments();
+  });
+}
+
+
+async function loadDishes({ forceRefresh = false } = {}) {
+  if (state.dishesLoading) return;
+  state.dishesLoading = true;
+
+  $('#content').innerHTML = '<div class="loading">Загружаем блюда и техкарты…</div>';
+
+  try {
+    const payload = await apiDishes({ forceRefresh });
+    state.dishes = payload.dishes || [];
+    renderDishes();
+  } catch (error) {
+    console.error(error);
+    $('#content').innerHTML = `
+      <div class="empty-state">
+        <strong>Не удалось загрузить блюда</strong>
+        ${escapeHtml(error.message)}
+      </div>
+    `;
+    toast(error.message);
+  } finally {
+    state.dishesLoading = false;
+  }
+}
+
+function filteredDishes() {
+  let rows = state.dishes.filter((item) => matches(
+    item.name,
+    item.code,
+    item.num,
+    item.category,
+    ruProductType(item.type)
+  ));
+
+  if (state.dishTypeFilter !== 'all') {
+    rows = rows.filter((item) => item.type === state.dishTypeFilter);
+  }
+
+  return rows.sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'ru')
+  );
+}
+
+function renderDishes() {
+  $('#balanceControls').hidden = false;
+  $('#periodControls').hidden = true;
+  document.querySelector('.field--store').hidden = true;
+
+  const rows = filteredDishes();
+  const dishesCount = rows.filter((x) => x.type === 'DISH').length;
+  const prepCount = rows.filter((x) => x.type === 'PREPARED').length;
+  const modifierCount = rows.filter((x) => x.type === 'MODIFIER').length;
+
+  metrics([
+    ['Всего', fmt.format(rows.length)],
+    ['Блюд', fmt.format(dishesCount)],
+    ['Полуфабрикатов', fmt.format(prepCount)],
+    ['Модификаторов', fmt.format(modifierCount)]
+  ]);
+
+  const types = [
+    ['all', 'Все'],
+    ['DISH', 'Блюда'],
+    ['PREPARED', 'Полуфабрикаты'],
+    ['MODIFIER', 'Модификаторы']
+  ];
+
+  $('#content').innerHTML = `
+    <div class="document-toolbar">
+      <div class="filter-chips">
+        ${types.map(([value, label]) => `
+          <button class="filter-chip ${state.dishTypeFilter === value ? 'active' : ''}"
+            type="button" data-dish-filter="${value}">${label}</button>
+        `).join('')}
+      </div>
+    </div>
+
+    ${rows.length ? `
+      <div class="dish-list">
+        ${rows.slice(0, 300).map((item) => `
+          <button class="dish-row" type="button" data-dish-id="${escAttr(item.id)}">
+            <div class="dish-row__main">
+              <strong>${escapeHtml(item.name)}</strong>
+              <span>
+                ${escapeHtml(item.code || item.num || 'Без кода')}
+                ${item.category ? ` · ${escapeHtml(item.category)}` : ''}
+              </span>
+            </div>
+            <div class="dish-row__type">${escapeHtml(ruProductType(item.type))}</div>
+            <div class="dish-row__price">
+              ${item.estimatedPurchasePrice ? money.format(item.estimatedPurchasePrice) : '—'}
+            </div>
+            <div class="dish-row__arrow">›</div>
+          </button>
+        `).join('')}
+      </div>
+      ${rows.length > 300 ? `<div class="list-note">Показаны первые 300 позиций. Используйте поиск для быстрого доступа.</div>` : ''}
+    ` : `
+      <div class="empty-state">
+        <strong>Ничего не найдено</strong>
+        Измените поиск или тип номенклатуры.
+      </div>
+    `}
+  `;
+
+  $$('[data-dish-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.dishTypeFilter = button.dataset.dishFilter;
+      renderDishes();
+    });
+  });
+
+  $$('.dish-row').forEach((button) => {
+    button.addEventListener('click', () => openDish(button.dataset.dishId));
+  });
+}
+
+async function openDish(productId) {
+  $('#summary').innerHTML = '';
+  $('#content').innerHTML = '<div class="loading">Открываем техкарту…</div>';
+
+  try {
+    const payload = await apiDishDetail(productId);
+    state.dishDetail = payload.dish;
+    renderDishDetail();
+  } catch (error) {
+    console.error(error);
+    toast(error.message);
+    renderDishes();
+  }
+}
+
+function renderDishDetail() {
+  const dish = state.dishDetail;
+  if (!dish) return renderDishes();
+
+  const ingredients = dish.ingredients || [];
+
+  $('#content').innerHTML = `
+    <div class="document-detail">
+      <div class="document-detail__top">
+        <button id="backToDishesBtn" class="back-button" type="button">← Назад</button>
+        <span class="status-badge">${escapeHtml(ruProductType(dish.type))}</span>
+      </div>
+
+      <div class="document-detail__header">
+        <div>
+          <div class="document-detail__type">${escapeHtml(dish.code || 'Номенклатура')}</div>
+          <h2>${escapeHtml(dish.name || 'Без названия')}</h2>
+          <p>
+            ${dish.category ? escapeHtml(dish.category) : 'Без категории'}
+            ${dish.unit ? ` · ${escapeHtml(dish.unit)}` : ''}
+          </p>
+        </div>
+        <strong class="document-detail__sum">
+          ${dish.estimatedPurchasePrice ? money.format(dish.estimatedPurchasePrice) : '—'}
+        </strong>
+      </div>
+
+      ${(dish.cookingTimeNormal || dish.cookingTimePeak) ? `
+        <div class="dish-facts">
+          <div><span>Обычное время</span><strong>${fmt.format(dish.cookingTimeNormal || 0)} мин</strong></div>
+          <div><span>Пиковое время</span><strong>${fmt.format(dish.cookingTimePeak || 0)} мин</strong></div>
+        </div>
+      ` : ''}
+
+      <div class="document-items-title">Состав · ${fmt.format(ingredients.length)}</div>
+
+      ${ingredients.length ? `
+        <div class="document-items">
+          ${ingredients.map((item) => `
+            <div class="dish-ingredient">
+              <div class="document-item__name">
+                <strong>${escapeHtml(item.name || item.productId || 'Ингредиент')}</strong>
+                ${item.lossPercent ? `<span>Потери: ${fmt.format(item.lossPercent)}%</span>` : ''}
+              </div>
+              <div class="document-item__qty">
+                <strong>${fmt.format(item.amount)}</strong>
+                <span>${escapeHtml(item.unit || '')}</span>
+              </div>
+              <div class="document-item__cost">
+                <strong>${item.costPrice ? money.format(item.costPrice) : '—'}</strong>
+                <span>себестоимость</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div class="empty-state">
+          <strong>Состав не найден</strong>
+          Для этой позиции iikoWeb не вернул строки техкарты.
+        </div>
+      `}
+    </div>
+  `;
+
+  $('#backToDishesBtn').addEventListener('click', () => {
+    state.dishDetail = null;
+    renderDishes();
+  });
+}
+
+async function loadTurnover({ forceRefresh = false } = {}) {
+  if (state.turnoverLoading) return;
+  state.turnoverLoading = true;
+
+  $('#content').innerHTML = '<div class="loading">Строим ОСВ…</div>';
+
+  try {
+    const payload = await apiTurnover({ forceRefresh });
+    state.turnoverRows = payload.rows || [];
+    renderTurnover();
+  } catch (error) {
+    console.error(error);
+    $('#content').innerHTML = `
+      <div class="empty-state">
+        <strong>Не удалось построить ОСВ</strong>
+        ${escapeHtml(error.message)}
+      </div>
+    `;
+    toast(error.message);
+  } finally {
+    state.turnoverLoading = false;
+  }
+}
+
+function turnoverFilteredRows() {
+  return state.turnoverRows.filter((row) => matches(
+    row.name, row.code, row.category, row.unit
+  ));
+}
+
+function renderTurnover() {
+  $('#balanceControls').hidden = false;
+  $('#periodControls').hidden = false;
+  document.querySelector('.field--store').hidden = true;
+
+  const rows = turnoverFilteredRows();
+
+  const open = rows.reduce((sum, x) => sum + Number(x.openAmt || 0), 0);
+  const purchase = rows.reduce((sum, x) => sum + Number(x.purchaseAmt || 0), 0);
+  const usage = rows.reduce((sum, x) => sum + Number(x.usageAmt || 0), 0);
+  const close = rows.reduce((sum, x) => sum + Number(x.closeAmt || 0), 0);
+
+  metrics([
+    ['Начальный остаток', money.format(open)],
+    ['Приход', money.format(purchase)],
+    ['Расход', money.format(usage)],
+    ['Конечный остаток', money.format(close)]
+  ]);
+
+  $('#content').innerHTML = `
+    <div class="document-toolbar">
+      <div class="filter-chips">
+        <button class="filter-chip ${state.turnoverMode === 'amount' ? 'active' : ''}"
+          type="button" data-turnover-mode="amount">Суммы ₽</button>
+        <button class="filter-chip ${state.turnoverMode === 'qty' ? 'active' : ''}"
+          type="button" data-turnover-mode="qty">Количество</button>
+      </div>
+    </div>
+
+    ${rows.length ? `
+      <div class="turnover-scroll">
+        <table class="turnover-table">
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Начало</th>
+              <th>Приход</th>
+              <th>Расход</th>
+              <th>Потери</th>
+              <th>Недостача</th>
+              <th>Излишек</th>
+              <th>Конец</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => {
+              const q = state.turnoverMode === 'qty';
+              const val = (prefix) => q ? row[`${prefix}Qty`] : row[`${prefix}Amt`];
+              const format = (v) => q ? fmt.format(v || 0) : money.format(v || 0);
+              return `
+                <tr>
+                  <td>
+                    <strong>${escapeHtml(row.name)}</strong>
+                    <span>${escapeHtml(row.code || '')}${row.unit ? ` · ${escapeHtml(row.unit)}` : ''}</span>
+                  </td>
+                  <td>${format(val('open'))}</td>
+                  <td>${format(val('purchase'))}</td>
+                  <td>${format(val('usage'))}</td>
+                  <td>${format(val('waste'))}</td>
+                  <td class="${val('shortage') < 0 || val('shortage') > 0 ? 'negative' : ''}">${format(val('shortage'))}</td>
+                  <td>${format(val('surplus'))}</td>
+                  <td><strong>${format(val('close'))}</strong></td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : `
+      <div class="empty-state">
+        <strong>Нет данных за период</strong>
+        Измените даты или поиск.
+      </div>
+    `}
+  `;
+
+  $$('[data-turnover-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.turnoverMode = button.dataset.turnoverMode;
+      renderTurnover();
+    });
   });
 }
 
@@ -861,6 +1254,8 @@ function render() {
 
   updateMenu();
 
+  document.querySelector('.field--store').hidden = false;
+
   if (state.tab === 'balances') {
     renderBalances();
   } else if (state.tab === 'documents') {
@@ -868,6 +1263,18 @@ function render() {
       renderDocuments();
     } else if (!state.documentsLoading) {
       loadDocuments();
+    }
+  } else if (state.tab === 'dishes') {
+    if (state.dishes.length) {
+      renderDishes();
+    } else if (!state.dishesLoading) {
+      loadDishes();
+    }
+  } else if (state.tab === 'turnover') {
+    if (state.turnoverRows.length) {
+      renderTurnover();
+    } else if (!state.turnoverLoading) {
+      loadTurnover();
     }
   } else {
     renderNotConnected();
@@ -878,6 +1285,16 @@ function setTab(tab) {
   state.tab = tab;
   state.page = 1;
   state.documentDetail = null;
+  state.dishDetail = null;
+
+  const placeholders = {
+    balances: 'Товар, код, категория',
+    documents: 'Номер, тип, склад, комментарий',
+    dishes: 'Блюдо, код, категория',
+    turnover: 'Товар, код, категория'
+  };
+  $('#searchInput').placeholder = placeholders[tab] || 'Поиск';
+
   closeMenu();
   render();
 }
@@ -894,6 +1311,12 @@ $('#refreshBtn').addEventListener('click', () => {
   if (state.tab === 'documents') {
     state.documents = [];
     loadDocuments({ forceRefresh: true });
+  } else if (state.tab === 'dishes') {
+    state.dishes = [];
+    loadDishes({ forceRefresh: true });
+  } else if (state.tab === 'turnover') {
+    state.turnoverRows = [];
+    loadTurnover({ forceRefresh: true });
   } else {
     loadAll({ forceRefresh: true, keepVisible: true });
   }
@@ -929,6 +1352,9 @@ $('#dateFrom').addEventListener('change', (event) => {
   if (state.tab === 'documents') {
     state.documents = [];
     loadDocuments();
+  } else if (state.tab === 'turnover') {
+    state.turnoverRows = [];
+    loadTurnover();
   } else {
     render();
   }
@@ -939,6 +1365,9 @@ $('#dateTo').addEventListener('change', (event) => {
   if (state.tab === 'documents') {
     state.documents = [];
     loadDocuments();
+  } else if (state.tab === 'turnover') {
+    state.turnoverRows = [];
+    loadTurnover();
   } else {
     render();
   }
