@@ -273,6 +273,31 @@ async function apiTurnover({ forceRefresh = false } = {}) {
   return payload;
 }
 
+
+function displayText(value, fallback = '') {
+  if (value == null) return fallback;
+
+  if (typeof value === 'string') {
+    return value === '[object Object]' ? fallback : value;
+  }
+
+  if (typeof value === 'number') return String(value);
+
+  if (typeof value === 'object') {
+    const preferred = [
+      value.name, value.value, value.ru_RU, value.ru,
+      value.title, value.displayName, value.label
+    ];
+
+    for (const candidate of preferred) {
+      const text = displayText(candidate, '');
+      if (text) return text;
+    }
+  }
+
+  return fallback;
+}
+
 function ruProductType(type) {
   const map = {
     DISH: 'Блюдо',
@@ -557,9 +582,28 @@ function getBalanceRows() {
   });
 }
 
-function renderBalances() {
+
+function configureMainControls({
+  showStore = true,
+  showBalanceFilters = false,
+  showDates = false
+} = {}) {
   $('#balanceControls').hidden = false;
-  $('#periodControls').hidden = true;
+  $('#periodControls').hidden = !showDates;
+
+  const storeField = document.querySelector('.field--store');
+  if (storeField) storeField.hidden = !showStore;
+
+  const balanceFilters = $('#balanceFilterChips');
+  if (balanceFilters) balanceFilters.hidden = !showBalanceFilters;
+}
+
+function renderBalances() {
+  configureMainControls({
+    showStore: true,
+    showBalanceFilters: true,
+    showDates: false
+  });
 
   const rows = getBalanceRows();
 
@@ -731,8 +775,11 @@ function filteredDocuments() {
 }
 
 function renderDocuments() {
-  $('#balanceControls').hidden = false;
-  $('#periodControls').hidden = false;
+  configureMainControls({
+    showStore: true,
+    showBalanceFilters: false,
+    showDates: true
+  });
 
   const docs = filteredDocuments();
   const total = docs.reduce((sum, doc) => sum + Number(doc.sum || 0), 0);
@@ -913,7 +960,7 @@ async function loadDishes({ forceRefresh = false } = {}) {
   if (state.dishesLoading) return;
   state.dishesLoading = true;
 
-  $('#content').innerHTML = '<div class="loading">Загружаем блюда и техкарты…</div>';
+  $('#content').innerHTML = '<div class="loading">Загружаем номенклатуру блюд…</div>';
 
   try {
     const payload = await apiDishes({ forceRefresh });
@@ -952,9 +999,11 @@ function filteredDishes() {
 }
 
 function renderDishes() {
-  $('#balanceControls').hidden = false;
-  $('#periodControls').hidden = true;
-  document.querySelector('.field--store').hidden = true;
+  configureMainControls({
+    showStore: false,
+    showBalanceFilters: false,
+    showDates: false
+  });
 
   const rows = filteredDishes();
   const dishesCount = rows.filter((x) => x.type === 'DISH').length;
@@ -990,7 +1039,7 @@ function renderDishes() {
         ${rows.slice(0, 300).map((item) => `
           <button class="dish-row" type="button" data-dish-id="${escAttr(item.id)}">
             <div class="dish-row__main">
-              <strong>${escapeHtml(item.name)}</strong>
+              <strong>${escapeHtml(displayText(item.name, 'Без названия'))}</strong>
               <span>
                 ${escapeHtml(item.code || item.num || 'Без кода')}
                 ${item.category ? ` · ${escapeHtml(item.category)}` : ''}
@@ -1056,7 +1105,7 @@ function renderDishDetail() {
       <div class="document-detail__header">
         <div>
           <div class="document-detail__type">${escapeHtml(dish.code || 'Номенклатура')}</div>
-          <h2>${escapeHtml(dish.name || 'Без названия')}</h2>
+          <h2>${escapeHtml(displayText(dish.name, 'Без названия'))}</h2>
           <p>
             ${dish.category ? escapeHtml(dish.category) : 'Без категории'}
             ${dish.unit ? ` · ${escapeHtml(dish.unit)}` : ''}
@@ -1081,7 +1130,7 @@ function renderDishDetail() {
           ${ingredients.map((item) => `
             <div class="dish-ingredient">
               <div class="document-item__name">
-                <strong>${escapeHtml(item.name || item.productId || 'Ингредиент')}</strong>
+                <strong>${escapeHtml(displayText(item.name, item.productId || 'Ингредиент'))}</strong>
                 ${item.lossPercent ? `<span>Потери: ${fmt.format(item.lossPercent)}%</span>` : ''}
               </div>
               <div class="document-item__qty">
@@ -1141,9 +1190,11 @@ function turnoverFilteredRows() {
 }
 
 function renderTurnover() {
-  $('#balanceControls').hidden = false;
-  $('#periodControls').hidden = false;
-  document.querySelector('.field--store').hidden = true;
+  configureMainControls({
+    showStore: false,
+    showBalanceFilters: false,
+    showDates: true
+  });
 
   const rows = turnoverFilteredRows();
 
@@ -1253,8 +1304,6 @@ function render() {
   if (!state.data) return;
 
   updateMenu();
-
-  document.querySelector('.field--store').hidden = false;
 
   if (state.tab === 'balances') {
     renderBalances();
