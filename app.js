@@ -24,6 +24,7 @@ const state = {
   dishesLoading: false,
   dishTypeFilter: 'all',
   dishDetail: null,
+  dishesSource: '',
   turnoverRows: [],
   turnoverLoading: false,
   turnoverMode: 'amount'
@@ -965,6 +966,9 @@ async function loadDishes({ forceRefresh = false } = {}) {
   try {
     const payload = await apiDishes({ forceRefresh });
     state.dishes = payload.dishes || [];
+    state.dishesSource = payload.source || '';
+    $('#connectionStatus').textContent =
+      `${payload.source || 'Источник'} · ${payload.cached ? 'кэш · ' : ''}обновлено ${formatUpdatedTime(payload.updatedAt || new Date().toISOString())}`;
     renderDishes();
   } catch (error) {
     console.error(error);
@@ -1047,7 +1051,7 @@ function renderDishes() {
             </div>
             <div class="dish-row__type">${escapeHtml(ruProductType(item.type))}</div>
             <div class="dish-row__price">
-              ${item.estimatedPurchasePrice ? money.format(item.estimatedPurchasePrice) : '—'}
+              ${item.menuPrice ? money.format(item.menuPrice) : '—'}
             </div>
             <div class="dish-row__arrow">›</div>
           </button>
@@ -1112,14 +1116,21 @@ function renderDishDetail() {
           </p>
         </div>
         <strong class="document-detail__sum">
-          ${dish.estimatedPurchasePrice ? money.format(dish.estimatedPurchasePrice) : '—'}
+          ${dish.menuPrice ? money.format(dish.menuPrice) : '—'}
         </strong>
       </div>
 
-      ${(dish.cookingTimeNormal || dish.cookingTimePeak) ? `
+      ${(dish.recipeDateFrom || dish.cookingPlaceType) ? `
         <div class="dish-facts">
-          <div><span>Обычное время</span><strong>${fmt.format(dish.cookingTimeNormal || 0)} мин</strong></div>
-          <div><span>Пиковое время</span><strong>${fmt.format(dish.cookingTimePeak || 0)} мин</strong></div>
+          <div><span>Техкарта с</span><strong>${escapeHtml(dish.recipeDateFrom || '—')}</strong></div>
+          <div><span>Место приготовления</span><strong>${escapeHtml(dish.cookingPlaceType || '—')}</strong></div>
+        </div>
+      ` : ''}
+
+      ${dish.technology ? `
+        <div class="dish-technology">
+          <span>Технология приготовления</span>
+          <p>${escapeHtml(dish.technology).replace(/\n/g, '<br>')}</p>
         </div>
       ` : ''}
 
@@ -1128,18 +1139,22 @@ function renderDishDetail() {
       ${ingredients.length ? `
         <div class="document-items">
           ${ingredients.map((item) => `
-            <div class="dish-ingredient">
+            <div class="dish-ingredient dish-ingredient--server">
               <div class="document-item__name">
                 <strong>${escapeHtml(displayText(item.name, item.productId || 'Ингредиент'))}</strong>
-                ${item.lossPercent ? `<span>Потери: ${fmt.format(item.lossPercent)}%</span>` : ''}
+                <span>${escapeHtml(item.productId || '')}</span>
               </div>
-              <div class="document-item__qty">
-                <strong>${fmt.format(item.amount)}</strong>
-                <span>${escapeHtml(item.unit || '')}</span>
+              <div class="ingredient-weight">
+                <strong>${fmt.format(item.gross ?? item.amount ?? 0)}</strong>
+                <span>брутто ${escapeHtml(item.unit || '')}</span>
               </div>
-              <div class="document-item__cost">
-                <strong>${item.costPrice ? money.format(item.costPrice) : '—'}</strong>
-                <span>себестоимость</span>
+              <div class="ingredient-weight">
+                <strong>${fmt.format(item.net ?? 0)}</strong>
+                <span>нетто ${escapeHtml(item.unit || '')}</span>
+              </div>
+              <div class="ingredient-weight">
+                <strong>${fmt.format(item.out ?? 0)}</strong>
+                <span>выход ${escapeHtml(item.unit || '')}</span>
               </div>
             </div>
           `).join('')}
@@ -1147,7 +1162,7 @@ function renderDishDetail() {
       ` : `
         <div class="empty-state">
           <strong>Состав не найден</strong>
-          Для этой позиции iikoWeb не вернул строки техкарты.
+          Для этой позиции iikoServer не вернул строки действующей техкарты.
         </div>
       `}
     </div>

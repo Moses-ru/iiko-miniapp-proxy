@@ -1228,3 +1228,61 @@ button:disabled {
     grid-area: cost;
   }
 }
+
+
+.dish-technology {
+  margin: 16px 0 18px;
+  padding: 15px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.dish-technology > span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.dish-technology p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.dish-ingredient--server {
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(90px, .65fr));
+}
+
+.ingredient-weight {
+  text-align: right;
+}
+
+.ingredient-weight strong,
+.ingredient-weight span {
+  display: block;
+}
+
+.ingredient-weight span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 780px) {
+  .dish-ingredient--server {
+    grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+    gap: 10px;
+  }
+
+  .dish-ingredient--server .document-item__name {
+    grid-column: 1 / -1;
+  }
+
+  .ingredient-weight {
+    text-align: left;
+  }
+}
