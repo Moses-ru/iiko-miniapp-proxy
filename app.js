@@ -816,6 +816,34 @@ async function loadDishes({ forceRefresh = false } = {}) {
 }
 
 
+
+function displayText(value, fallback = '') {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value);
+  }
+
+  if (typeof value === 'object') {
+    const candidate =
+      value.name ??
+      value.displayName ??
+      value.title ??
+      value.value ??
+      value.text ??
+      value.code ??
+      '';
+
+    if (candidate !== '' && candidate !== null && candidate !== undefined) {
+      return String(candidate);
+    }
+  }
+
+  return fallback || String(value);
+}
+
 function ruProductType(type) {
   const value = String(type || '').toUpperCase();
 
