@@ -1286,3 +1286,50 @@ button:disabled {
     text-align: left;
   }
 }
+
+
+/* v43 — live iikoServer balances */
+.balance-head--live,
+.balance-row--live {
+  grid-template-columns: minmax(0, 1.7fr) minmax(150px, .75fr) minmax(140px, .55fr);
+}
+
+.value-primary.muted {
+  color: var(--text-muted, #6b7280);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 780px) {
+  .balance-head--live {
+    display: none;
+  }
+
+  .balance-row--live {
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+  }
+
+  .balance-row--live .product-cell {
+    grid-column: 1 / -1;
+  }
+
+  .balance-row--live .cell-store {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .balance-row--live .cell-qty {
+    grid-column: 2;
+    text-align: right;
+    align-items: flex-end;
+  }
+
+  .balance-row--live .cell-qty::before {
+    content: "Остаток";
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted, #6b7280);
+    margin-bottom: 2px;
+  }
+}

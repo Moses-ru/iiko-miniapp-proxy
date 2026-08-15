@@ -1,19 +1,39 @@
 const cfg = window.APP_CONFIG || {};
 
-const LOCAL_CACHE_KEY = 'iiko-miniapp:store-balance:v2';
-const LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const LIVE_STORES = [
+  { id: '4ba256dc-ac44-4df2-9e92-3746549c5b4b', name: 'Бар Сургут' },
+  { id: '73a57aee-1b68-4a18-bc7c-a308d61c92c2', name: 'Кухня Сургут' },
+  { id: 'c8d5ad09-4cf9-4f8c-9273-fd4b25b40446', name: 'Хоз.склад Сургут' },
+  { id: '6f84bcad-19e0-40ef-82b6-7ce463d64fe5', name: 'Сыроварня Сургут' },
+  { id: '8901986b-b0c5-4ac5-becd-9c746e90dd21', name: 'Бар Лиличка NEW' },
+  { id: '3378ac9f-e453-42dc-b930-9293d7030fce', name: 'Кухня Лиличка NEW' },
+  { id: '5554ba08-e6cb-4f43-b394-9b23eaec3b5a', name: 'Хозы Лиличка NEW' }
+];
+
 
 const state = {
   tab: 'balances',
-  data: null,
+  data: {
+    stores: LIVE_STORES,
+    products: [],
+    balances: [],
+    documents: [],
+    inventories: [],
+    dishes: [],
+    movements: []
+  },
   query: '',
-  storeId: '',
+  storeId: LIVE_STORES[0].id,
+  liveStockItems: [],
+  liveStockTotal: 0,
+  liveStockLoading: false,
+  liveStockLoaded: false,
   balanceFilter: 'all',
   from: '',
   to: '',
   loading: false,
   page: 1,
-  pageSize: 30,
+  pageSize: 20,
   lastUpdatedAt: null,
   documents: [],
   documentsLoading: false,
@@ -132,19 +152,30 @@ function metrics(items) {
   `).join('');
 }
 
-async function apiStoreBalance({ forceRefresh = false } = {}) {
-  const endpoint = cfg.storeBalanceEndpoint || '/api/store-balance';
-  const suffix = forceRefresh
-    ? `${endpoint.includes('?') ? '&' : '?'}refresh=1&_=${Date.now()}`
-    : endpoint;
+async function apiLiveStock({ forceRefresh = false } = {}) {
+  const selectedStore = LIVE_STORES.find((store) =>
+    String(store.id) === String(state.storeId)
+  ) || LIVE_STORES[0];
 
-  const response = await fetch(`${cfg.workerUrl}${suffix}`, {
-    method: 'GET',
-    cache: 'no-store',
-    headers: {
-      Accept: 'application/json'
-    }
+  const params = new URLSearchParams({
+    store: selectedStore.name,
+    q: state.query.trim(),
+    limit: String(state.pageSize),
+    offset: String((state.page - 1) * state.pageSize)
   });
+
+  if (forceRefresh) {
+    params.set('_', String(Date.now()));
+  }
+
+  const response = await fetch(
+    `${cfg.workerUrl}/api/stock-live?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' }
+    }
+  );
 
   const text = await response.text();
   let payload;
@@ -160,37 +191,6 @@ async function apiStoreBalance({ forceRefresh = false } = {}) {
   }
 
   return payload;
-}
-
-function saveLocalCache(raw) {
-  try {
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({
-      savedAt: Date.now(),
-      raw
-    }));
-  } catch (error) {
-    console.warn('LOCAL CACHE: save failed', error);
-  }
-}
-
-function readLocalCache() {
-  try {
-    const value = localStorage.getItem(LOCAL_CACHE_KEY);
-    if (!value) return null;
-
-    const parsed = JSON.parse(value);
-    if (!parsed?.raw || !parsed?.savedAt) return null;
-
-    if (Date.now() - parsed.savedAt > LOCAL_CACHE_MAX_AGE_MS) {
-      localStorage.removeItem(LOCAL_CACHE_KEY);
-      return null;
-    }
-
-    return parsed;
-  } catch (error) {
-    console.warn('LOCAL CACHE: read failed', error);
-    return null;
-  }
 }
 
 function formatUpdatedTime(value) {
@@ -209,380 +209,103 @@ function formatUpdatedTime(value) {
   });
 }
 
-function applyRawData(raw, { local = false } = {}) {
-  state.data = transformStoreBalance(raw);
-  state.lastUpdatedAt = raw.updatedAt || new Date().toISOString();
+async function loadBalances({ forceRefresh = false, keepVisible = false } = {}) {
+  if (state.liveStockLoading) return;
 
-  fillStores();
-  render();
-
-  if (local) {
-    $('#connectionStatus').textContent =
-      `Сохранённые данные · ${formatUpdatedTime(state.lastUpdatedAt)} · обновляем…`;
-  } else {
-    const cacheLabel = raw.cached ? 'кэш' : 'iikoWeb';
-    $('#connectionStatus').textContent =
-      `${cacheLabel} · обновлено ${formatUpdatedTime(state.lastUpdatedAt)}`;
-  }
-}
-
-
-
-async function apiDishes({ forceRefresh = false } = {}) {
-  const suffix = forceRefresh ? '?refresh=1' : '';
-  const response = await fetch(
-    `${cfg.workerUrl}/api/dishes${suffix}`,
-    { cache: 'no-store', headers: { Accept: 'application/json' } }
-  );
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload || payload.ok === false) {
-    throw new Error(payload?.error || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function apiDishDetail(productId) {
-  const response = await fetch(
-    `${cfg.workerUrl}/api/dish/${encodeURIComponent(productId)}`,
-    { cache: 'no-store', headers: { Accept: 'application/json' } }
-  );
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload || payload.ok === false) {
-    throw new Error(payload?.error || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function apiTurnover({ forceRefresh = false } = {}) {
-  const params = new URLSearchParams({
-    dateFrom: state.from,
-    dateTo: state.to
-  });
-  if (forceRefresh) params.set('refresh', '1');
-
-  const response = await fetch(
-    `${cfg.workerUrl}/api/turnover?${params.toString()}`,
-    { cache: 'no-store', headers: { Accept: 'application/json' } }
-  );
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload || payload.ok === false) {
-    throw new Error(payload?.error || `HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-
-function displayText(value, fallback = '') {
-  if (value == null) return fallback;
-
-  if (typeof value === 'string') {
-    return value === '[object Object]' ? fallback : value;
-  }
-
-  if (typeof value === 'number') return String(value);
-
-  if (typeof value === 'object') {
-    const preferred = [
-      value.name, value.value, value.ru_RU, value.ru,
-      value.title, value.displayName, value.label
-    ];
-
-    for (const candidate of preferred) {
-      const text = displayText(candidate, '');
-      if (text) return text;
-    }
-  }
-
-  return fallback;
-}
-
-function ruProductType(type) {
-  const map = {
-    DISH: 'Блюдо',
-    PREPARED: 'Полуфабрикат',
-    MODIFIER: 'Модификатор',
-    GOODS: 'Товар',
-    SERVICE: 'Услуга',
-    RATE: 'Тариф'
-  };
-  return map[type] || type || 'Позиция';
-}
-
-async function apiDocuments({ forceRefresh = false } = {}) {
-  const params = new URLSearchParams({
-    dateFrom: state.from,
-    dateTo: state.to
-  });
-
-  if (forceRefresh) params.set('refresh', '1');
-
-  const response = await fetch(
-    `${cfg.workerUrl}/api/documents?${params.toString()}`,
-    { cache: 'no-store', headers: { Accept: 'application/json' } }
-  );
-
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok || !payload || payload.ok === false) {
-    throw new Error(payload?.error || `HTTP ${response.status}`);
-  }
-
-  return payload;
-}
-
-async function apiDocumentDetail(documentId, type) {
-  const response = await fetch(
-    `${cfg.workerUrl}/api/document/${encodeURIComponent(documentId)}?type=${encodeURIComponent(type)}`,
-    { cache: 'no-store', headers: { Accept: 'application/json' } }
-  );
-
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok || !payload || payload.ok === false) {
-    throw new Error(payload?.error || `HTTP ${response.status}`);
-  }
-
-  return payload;
-}
-
-function ruDocumentType(doc) {
-  const map = {
-    WRITEOFF_DOCUMENT: 'Списание',
-    SALES_DOCUMENT: 'Продажа',
-    INCOMING_INVOICE: 'Приходная накладная',
-    OUTGOING_INVOICE: 'Расходная накладная',
-    INTERNAL_TRANSFER: 'Перемещение',
-    RETURN_INVOICE: 'Возврат',
-    INVENTORY_DOCUMENT: 'Инвентаризация'
-  };
-
-  return map[doc?.type] || doc?.typeName || doc?.type || 'Документ';
-}
-
-function ruDocumentStatus(doc) {
-  const map = {
-    PROCESSED: 'Проведён',
-    NEW: 'Новый',
-    DELETED: 'Удалён',
-    CANCELLED: 'Отменён'
-  };
-
-  return map[doc?.status] || doc?.statusName || doc?.status || '';
-}
-
-function cleanUnitName(value) {
-  const text = String(value || '').trim();
-
-  // Старый iikoWeb иногда присылает ID единицы вместо её названия.
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
-    return '';
-  }
-
-  return text;
-}
-
-function formatDocumentDate(value, withTime = true) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString('ru-RU', withTime
-    ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }
-    : { day: '2-digit', month: '2-digit', year: 'numeric' }
-  );
-}
-
-function documentStorageLabel(doc) {
-  if (doc.storage) return storeName(doc.storage);
-
-  const from = doc.storageFrom ? storeName(doc.storageFrom) : '';
-  const to = doc.storageTo ? storeName(doc.storageTo) : '';
-
-  if (from && to) return `${from} → ${to}`;
-  return from || to || '—';
-}
-
-function transformStoreBalance(payload) {
-  const storages = (payload.storages || []).filter((storage) => !storage.deleted);
-
-  const stores = storages.map((storage) => ({
-    id: storage.id,
-    name: storage.name || 'Без названия'
-  }));
-
-  const products = new Map();
-  const balances = [];
-
-  for (const storage of storages) {
-    for (const item of storage.products || []) {
-      if (!item.id || item.deleted) continue;
-
-      if (!products.has(item.id)) {
-        products.set(item.id, {
-          id: item.id,
-          name: item.name || '',
-          sku: item.code || item.num || '',
-          code: item.code || '',
-          num: item.num || '',
-          unit: item.unit || '',
-          category: item.category || '',
-          productType: item.productType || ''
-        });
-      }
-
-      balances.push({
-        productId: item.id,
-        storeId: storage.id,
-        quantity: Number(item.quantity ?? item.amount ?? 0),
-        amount: Number(item.amount ?? 0),
-        cost: Number(item.costPrice ?? 0),
-        consumptionForecast: Number(item.consumptionForecast ?? 0),
-        suggestedQty: Number(item.suggestedQty ?? 0)
-      });
-    }
-  }
-
-  return {
-    stores,
-    products: [...products.values()],
-    balances,
-    documents: [],
-    inventories: [],
-    dishes: [],
-    movements: []
-  };
-}
-
-async function loadAll({ forceRefresh = false, keepVisible = false } = {}) {
-  if (state.loading) return;
-
-  state.loading = true;
+  state.liveStockLoading = true;
   $('#refreshBtn').disabled = true;
 
-  if (!keepVisible || !state.data) {
-    $('#connectionStatus').textContent = 'Загрузка данных…';
+  if (!keepVisible || !state.liveStockLoaded) {
+    $('#connectionStatus').textContent = 'Загрузка живых остатков…';
     $('#summary').innerHTML = '';
-    $('#content').innerHTML = '<div class="loading">Получаем данные из iikoWeb…</div>';
+    $('#content').innerHTML =
+      '<div class="loading">Получаем текущие остатки из iikoServer…</div>';
   } else {
-    $('#connectionStatus').textContent = 'Обновляем данные…';
+    $('#connectionStatus').textContent = 'Обновляем живые остатки…';
   }
 
   try {
-    const raw = await apiStoreBalance({ forceRefresh });
+    const payload = await apiLiveStock({ forceRefresh });
 
-    saveLocalCache(raw);
-    applyRawData(raw);
+    state.liveStockItems = payload.items || [];
+    state.liveStockTotal = Number(payload.pagination?.total || 0);
+    state.liveStockLoaded = true;
+    state.lastUpdatedAt = payload.time || new Date().toISOString();
+
+    $('#connectionStatus').textContent =
+      `iikoServer · живые остатки · ${formatUpdatedTime(state.lastUpdatedAt)}`;
+
+    renderBalances();
 
     if (forceRefresh) {
-      toast('Данные обновлены');
+      toast('Живые остатки обновлены');
     }
   } catch (error) {
     console.error(error);
 
-    if (state.data) {
-      $('#connectionStatus').textContent =
-        `Сохранённые данные · ${formatUpdatedTime(state.lastUpdatedAt)}`;
-      toast(`Не удалось обновить: ${error.message}`);
-    } else {
-      $('#connectionStatus').textContent = 'Ошибка подключения';
+    $('#connectionStatus').textContent = 'Ошибка получения живых остатков';
+
+    if (!keepVisible || !state.liveStockLoaded) {
       $('#summary').innerHTML = '';
       $('#content').innerHTML = `
         <div class="empty-state">
-          <strong>Не удалось получить данные из iikoWeb</strong>
+          <strong>Не удалось получить живые остатки</strong>
           ${escapeHtml(error.message)}
         </div>
       `;
-      toast(error.message);
     }
+
+    toast(error.message);
   } finally {
-    state.loading = false;
+    state.liveStockLoading = false;
     $('#refreshBtn').disabled = false;
   }
 }
 
 function startFastLoad() {
-  const cached = readLocalCache();
-
-  if (cached?.raw) {
-    try {
-      applyRawData(cached.raw, { local: true });
-
-      // Показываем сохранённые остатки сразу, свежие подтягиваем в фоне.
-      loadAll({ forceRefresh: false, keepVisible: true });
-      return;
-    } catch (error) {
-      console.warn('LOCAL CACHE: invalid data', error);
-      try {
-        localStorage.removeItem(LOCAL_CACHE_KEY);
-      } catch {}
-    }
-  }
-
-  loadAll();
+  fillStores();
+  loadBalances();
 }
 
 function fillStores() {
   const select = $('#storeFilter');
-  const previous = state.storeId;
+  const previous = state.storeId || LIVE_STORES[0].id;
 
-  select.innerHTML =
-    '<option value="">Все склады</option>' +
-    (state.data?.stores || []).map((store) =>
-      `<option value="${escAttr(store.id)}">${escapeHtml(store.name)}</option>`
-    ).join('');
+  select.innerHTML = LIVE_STORES.map((store) =>
+    `<option value="${escAttr(store.id)}">${escapeHtml(store.name)}</option>`
+  ).join('');
 
-  if ((state.data?.stores || []).some((store) =>
-    String(store.id) === String(previous)
-  )) {
-    select.value = previous;
+  if (LIVE_STORES.some((store) => String(store.id) === String(previous))) {
+    state.storeId = previous;
   } else {
-    state.storeId = '';
-    select.value = '';
+    state.storeId = LIVE_STORES[0].id;
   }
+
+  select.value = state.storeId;
 }
 
 function getBalanceRows() {
-  const productById = new Map(
-    (state.data?.products || []).map((product) => [product.id, product])
-  );
-
-  let rows = (state.data?.balances || [])
-    .filter((row) => !state.storeId ||
-      String(row.storeId) === String(state.storeId))
-    .map((row) => ({
-      ...row,
-      product: productById.get(row.productId)
-    }))
-    .filter((row) => matches(
-      row.product?.name,
-      row.product?.sku,
-      row.product?.code,
-      row.product?.num,
-      row.product?.category,
-      storeName(row.storeId)
-    ));
+  let rows = (state.liveStockItems || []).map((item) => ({
+    ...item,
+    quantity: Number.isFinite(Number(item.quantity))
+      ? Number(item.quantity)
+      : null
+  }));
 
   if (state.balanceFilter === 'stock') {
-    rows = rows.filter((row) => row.quantity !== 0);
+    rows = rows.filter((row) =>
+      row.balanceStatus === 'ok' && row.quantity !== 0
+    );
   }
 
   if (state.balanceFilter === 'negative') {
-    rows = rows.filter((row) => row.quantity < 0);
+    rows = rows.filter((row) =>
+      row.balanceStatus === 'ok' && row.quantity < 0
+    );
   }
 
-  return rows.sort((a, b) => {
-    if (a.quantity < 0 && b.quantity >= 0) return -1;
-    if (b.quantity < 0 && a.quantity >= 0) return 1;
-    return String(a.product?.name || '').localeCompare(
-      String(b.product?.name || ''),
-      'ru'
-    );
-  });
+  return rows;
 }
-
 
 function configureMainControls({
   showStore = true,
@@ -602,57 +325,57 @@ function configureMainControls({
 function renderBalances() {
   configureMainControls({
     showStore: true,
-    showBalanceFilters: true,
+    showBalanceFilters: false,
     showDates: false
   });
 
   const rows = getBalanceRows();
+  const withBalance = rows.filter((row) => row.balanceStatus === 'ok').length;
+  const notOnStore = rows.filter((row) =>
+    row.balanceStatus === 'not_on_store_or_no_balance'
+  ).length;
 
-  const totalValue = rows.reduce((sum, row) =>
-    sum + Number(row.amount || 0), 0);
-
-  const withStock = rows.filter((row) => row.quantity !== 0).length;
+  const selectedStore = LIVE_STORES.find((store) =>
+    String(store.id) === String(state.storeId)
+  );
 
   metrics([
-    ['Складов', fmt.format(state.storeId ? 1 : state.data.stores.length)],
-    ['Позиций', fmt.format(rows.length)],
-    ['С остатком', fmt.format(withStock)],
-    ['Стоимость', money.format(totalValue)]
+    ['Склад', selectedStore?.name || '—'],
+    ['Найдено', fmt.format(state.liveStockTotal)],
+    ['На странице', fmt.format(rows.length)],
+    ['Нет на складе', fmt.format(notOnStore)]
   ]);
 
-  const pageCount = Math.max(1, Math.ceil(rows.length / state.pageSize));
+  const pageCount = Math.max(1, Math.ceil(state.liveStockTotal / state.pageSize));
   state.page = Math.min(state.page, pageCount);
 
   const start = (state.page - 1) * state.pageSize;
-  const pageRows = rows.slice(start, start + state.pageSize);
 
-  if (!pageRows.length) {
+  if (!rows.length) {
     $('#content').innerHTML = `
       <div class="empty-state">
         <strong>Ничего не найдено</strong>
-        Попробуйте изменить склад, поиск или фильтр.
+        Попробуйте изменить склад или поисковый запрос.
       </div>
     `;
     return;
   }
 
   $('#content').innerHTML = `
-    <div class="balance-head">
-      <div>Товар / код / категория</div>
+    <div class="balance-head balance-head--live">
+      <div>Товар / артикул</div>
       <div>Склад</div>
-      <div>Остаток</div>
-      <div>Себестоимость</div>
-      <div>Сумма</div>
+      <div>Живой остаток</div>
     </div>
 
     <div class="balance-list">
-      ${pageRows.map(renderBalanceRow).join('')}
+      ${rows.map(renderBalanceRow).join('')}
     </div>
 
     <div class="pagination">
       <div class="pagination__info">
-        ${fmt.format(start + 1)}–${fmt.format(Math.min(start + state.pageSize, rows.length))}
-        из ${fmt.format(rows.length)}
+        ${fmt.format(start + 1)}–${fmt.format(Math.min(start + rows.length, state.liveStockTotal))}
+        из ${fmt.format(state.liveStockTotal)}
       </div>
 
       <div class="pagination__buttons">
@@ -669,7 +392,7 @@ function renderBalances() {
   $('#prevPageBtn')?.addEventListener('click', () => {
     if (state.page > 1) {
       state.page -= 1;
-      renderBalances();
+      loadBalances();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   });
@@ -677,54 +400,53 @@ function renderBalances() {
   $('#nextPageBtn')?.addEventListener('click', () => {
     if (state.page < pageCount) {
       state.page += 1;
-      renderBalances();
+      loadBalances();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   });
 }
 
 function renderBalanceRow(row) {
-  const product = row.product || {};
-  const isNegative = row.quantity < 0;
+  const hasBalance = row.balanceStatus === 'ok';
+  const isNegative = hasBalance && row.quantity < 0;
+
+  let quantityText = 'Нет на складе';
+  let quantityClass = 'muted';
+
+  if (hasBalance) {
+    quantityText = fmt.format(row.quantity);
+    quantityClass = isNegative ? 'negative' : '';
+  } else if (row.balanceStatus === 'error') {
+    quantityText = 'Ошибка';
+    quantityClass = 'negative';
+  }
 
   return `
-    <article class="balance-row ${isNegative ? 'row-negative' : ''}">
+    <article class="balance-row balance-row--live ${isNegative ? 'row-negative' : ''}">
       <div class="product-cell">
         <div class="product-name ${isNegative ? 'negative' : ''}">
-          ${escapeHtml(product.name || row.productId)}
+          ${escapeHtml(row.productName || row.id)}
         </div>
         <div class="product-meta">
-          <span>${escapeHtml(product.sku || 'Без кода')}</span>
-          ${product.category ? `<span>• ${escapeHtml(product.category)}</span>` : ''}
+          <span>${escapeHtml(row.productNum || 'Без артикула')}</span>
         </div>
       </div>
 
       <div class="cell-store">
-        <span class="store-badge">${escapeHtml(storeName(row.storeId))}</span>
+        <span class="store-badge">${escapeHtml(storeName(state.storeId))}</span>
       </div>
 
       <div class="value-cell cell-qty">
-        <div class="value-primary ${isNegative ? 'negative' : ''}">
-          ${fmt.format(row.quantity)}
+        <div class="value-primary ${quantityClass}">
+          ${escapeHtml(quantityText)}
         </div>
-        <div class="value-secondary">${escapeHtml(product.unit || '')}</div>
-      </div>
-
-      <div class="value-cell cell-cost">
-        <div class="value-primary">${money.format(row.cost || 0)}</div>
-        <div class="value-secondary">за ед.</div>
-      </div>
-
-      <div class="value-cell cell-sum">
-        <div class="value-primary ${row.amount < 0 ? 'negative' : ''}">
-          ${money.format(row.amount || 0)}
+        <div class="value-secondary">
+          ${hasBalance ? escapeHtml(row.unit || '') : ''}
         </div>
-        <div class="value-secondary">сумма</div>
       </div>
     </article>
   `;
 }
-
 
 async function loadDocuments({ forceRefresh = false } = {}) {
   if (state.documentsLoading) return;
@@ -1321,7 +1043,11 @@ function render() {
   updateMenu();
 
   if (state.tab === 'balances') {
-    renderBalances();
+    if (state.liveStockLoaded) {
+      renderBalances();
+    } else if (!state.liveStockLoading) {
+      loadBalances();
+    }
   } else if (state.tab === 'documents') {
     if (state.documents.length) {
       renderDocuments();
@@ -1382,20 +1108,37 @@ $('#refreshBtn').addEventListener('click', () => {
     state.turnoverRows = [];
     loadTurnover({ forceRefresh: true });
   } else {
-    loadAll({ forceRefresh: true, keepVisible: true });
+    loadBalances({ forceRefresh: true, keepVisible: true });
   }
 });
 
 $('#storeFilter').addEventListener('change', (event) => {
   state.storeId = event.target.value;
   state.page = 1;
-  render();
+
+  if (state.tab === 'balances') {
+    state.liveStockLoaded = false;
+    loadBalances();
+  } else {
+    render();
+  }
 });
+
+let searchTimer = null;
 
 $('#searchInput').addEventListener('input', (event) => {
   state.query = event.target.value;
   state.page = 1;
-  render();
+
+  if (state.tab === 'balances') {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.liveStockLoaded = false;
+      loadBalances();
+    }, 350);
+  } else {
+    render();
+  }
 });
 
 $$('[data-balance-filter]').forEach((button) => {
@@ -1407,7 +1150,11 @@ $$('[data-balance-filter]').forEach((button) => {
       item.classList.toggle('active', item === button);
     });
 
-    render();
+    if (state.tab === 'balances') {
+      renderBalances();
+    } else {
+      render();
+    }
   });
 });
 
