@@ -841,28 +841,40 @@ function displayText(value, fallback = '') {
 function recipeMeasure(value, unit) {
   const n = Number(value ?? 0);
   const rawUnit = String(unit || '').trim();
-  const u = rawUnit.toLocaleLowerCase('ru-RU');
+  const u = rawUnit
+    .toLocaleLowerCase('ru-RU')
+    .replace(/\./g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   if (!Number.isFinite(n)) {
     return `${displayText(value, '0')} ${rawUnit}`.trim();
   }
 
-  // iikoOffice commonly stores recipe weights in kg and liquids in liters.
-  // On recipe cards we show them in user-friendly grams / milliliters.
-  if (u === 'кг' || u === 'kg') {
+  // productCharts returns recipe quantities in the ingredient's main unit.
+  // For the card we convert kg -> g and liters -> ml.
+  if (['кг', 'kg', 'килограмм', 'килограммы'].includes(u)) {
     return `${fmt.format(n * 1000)} г`;
   }
 
-  if (u === 'л' || u === 'l' || u === 'литр' || u === 'литры') {
+  if (['л', 'l', 'литр', 'литры', 'литров'].includes(u)) {
     return `${fmt.format(n * 1000)} мл`;
   }
 
-  if (u === 'г' || u === 'гр' || u === 'g') {
+  if (['г', 'гр', 'g', 'грамм', 'граммы'].includes(u)) {
     return `${fmt.format(n)} г`;
   }
 
-  if (u === 'мл' || u === 'ml') {
+  if (['мл', 'ml', 'миллилитр', 'миллилитры'].includes(u)) {
     return `${fmt.format(n)} мл`;
+  }
+
+  if (['шт', 'штука', 'штуки', 'pcs', 'pc'].includes(u)) {
+    return `${fmt.format(n)} шт`;
+  }
+
+  if (['порц', 'порция', 'порции'].includes(u)) {
+    return `${fmt.format(n)} порц`;
   }
 
   return `${fmt.format(n)}${rawUnit ? ` ${rawUnit}` : ''}`;
@@ -1067,15 +1079,15 @@ function renderDishDetail() {
               </div>
               <div class="ingredient-weight">
                 <strong>${escapeHtml(recipeMeasure(item.gross ?? item.amount ?? 0, item.unit))}</strong>
-                <span>брутто</span>
+                <span>брутто${item.unit ? ` · ${escapeHtml(item.unit)}` : ''}</span>
               </div>
               <div class="ingredient-weight">
                 <strong>${escapeHtml(recipeMeasure(item.net ?? 0, item.unit))}</strong>
-                <span>нетто</span>
+                <span>нетто${item.unit ? ` · ${escapeHtml(item.unit)}` : ''}</span>
               </div>
               <div class="ingredient-weight">
                 <strong>${escapeHtml(recipeMeasure(item.out ?? 0, item.unit))}</strong>
-                <span>выход</span>
+                <span>выход${item.unit ? ` · ${escapeHtml(item.unit)}` : ''}</span>
               </div>
             </div>
           `).join('')}
