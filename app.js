@@ -815,6 +815,17 @@ async function loadDishes({ forceRefresh = false } = {}) {
   }
 }
 
+
+function ruProductType(type) {
+  const value = String(type || '').toUpperCase();
+
+  if (value === 'DISH') return 'Блюдо';
+  if (value === 'GOODS') return 'Товар';
+  if (value === 'PREPARED') return 'Полуфабрикат';
+
+  return type || 'Номенклатура';
+}
+
 function filteredDishes() {
   let rows = state.dishes.filter((item) => matches(
     item.name,
