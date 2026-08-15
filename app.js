@@ -1080,6 +1080,56 @@ function renderTurnover() {
     `;
   };
 
+  const hasMovement = (qty, amt) =>
+    Math.abs(Number(qty || 0)) > 0.000001 ||
+    Math.abs(Number(amt || 0)) > 0.01;
+
+  const mobileMovementRows = (row) => {
+    const items = [
+      ['Приход', row.purchaseQty, row.purchaseAmt],
+      ['Продажи', row.salesQty, row.salesAmt],
+      ['Перемещения', row.transferQty, row.transferAmt],
+      ['Списания', row.writeoffQty, row.writeoffAmt],
+      ['Инвентаризация', row.inventoryQty, row.inventoryAmt],
+      ['Расходные накладные', row.outgoingInvoiceQty, row.outgoingInvoiceAmt],
+      ['Производство', row.productionQty, row.productionAmt],
+      ['Преобразование', row.transformationQty, row.transformationAmt],
+      ['Возвраты', row.returnedQty, row.returnedAmt],
+      ['Возврат прихода', row.incomingReturnedQty, row.incomingReturnedAmt],
+      ['Разборка', row.disassembleQty, row.disassembleAmt]
+    ].filter(([, qty, amt]) => hasMovement(qty, amt));
+
+    if (Math.abs(Number(row.costCorrection || 0)) > 0.01) {
+      items.push(['Коррекция себестоимости', null, row.costCorrection]);
+    }
+
+    if (hasMovement(row.otherQty, row.otherAmt)) {
+      items.push(['Прочее ⚠️', row.otherQty, row.otherAmt]);
+    }
+
+    if (!items.length) {
+      return `
+        <div class="osv-mobile-empty-movement">
+          Движений за период нет
+        </div>
+      `;
+    }
+
+    return items.map(([label, qty, amt]) => `
+      <div class="osv-mobile-movement-row ${label.startsWith('Прочее') ? 'is-warning' : ''}">
+        <span>${escapeHtml(label)}</span>
+        <div>
+          ${qty === null
+            ? ''
+            : `<strong>${fmt.format(qty || 0)}</strong>`}
+          ${mode !== 'qty'
+            ? `<small>${money.format(amt || 0)}</small>`
+            : ''}
+        </div>
+      </div>
+    `).join('');
+  };
+
   $('#content').innerHTML = `
     <div class="document-toolbar">
       <div class="filter-chips">
@@ -1095,10 +1145,61 @@ function renderTurnover() {
     ${rows.length ? `
       <div class="turnover-note">
         ОСВ строится в расширенном режиме iikoOffice.
-        Знаки движений показаны ровно так, как их возвращает сервер.
-        «Прочее» — только контрольная разница после всех расширенных колонок.
+        На телефоне показываются только ненулевые движения.
+        «Прочее» — контрольная разница и в норме должна быть около нуля.
       </div>
-      <div class="turnover-scroll">
+
+      <div class="osv-mobile-list">
+        ${rows.map((row) => {
+          const deltaQty =
+            Number(row.closeQty || 0) - Number(row.openQty || 0);
+          const deltaAmt =
+            Number(row.closeAmt || 0) - Number(row.openAmt || 0);
+
+          return `
+            <details class="osv-mobile-card">
+              <summary>
+                <div class="osv-mobile-card-head">
+                  <div class="osv-mobile-title">
+                    <strong>${escapeHtml(row.name)}</strong>
+                    <span>
+                      ${escapeHtml(row.code || '')}
+                      ${row.unit ? ` · ${escapeHtml(row.unit)}` : ''}
+                    </span>
+                  </div>
+                  <span class="osv-mobile-chevron">⌄</span>
+                </div>
+
+                <div class="osv-mobile-balance">
+                  <div>
+                    <span>Начало</span>
+                    ${pairValue(row.openQty, row.openAmt)}
+                  </div>
+                  <div class="osv-mobile-arrow">→</div>
+                  <div>
+                    <span>Конец</span>
+                    ${pairValue(row.closeQty, row.closeAmt)}
+                  </div>
+                </div>
+
+                <div class="osv-mobile-delta ${deltaQty < 0 ? 'is-negative' : deltaQty > 0 ? 'is-positive' : ''}">
+                  За период:
+                  <strong>${deltaQty > 0 ? '+' : ''}${fmt.format(deltaQty)}</strong>
+                  ${mode !== 'qty'
+                    ? `<span>${deltaAmt > 0 ? '+' : ''}${money.format(deltaAmt)}</span>`
+                    : ''}
+                </div>
+              </summary>
+
+              <div class="osv-mobile-details">
+                ${mobileMovementRows(row)}
+              </div>
+            </details>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="turnover-scroll osv-desktop-table">
         <table class="turnover-table turnover-table--osv">
           <thead>
             <tr>
@@ -1149,7 +1250,7 @@ function renderTurnover() {
                     ? '<span class="turnover-cost">—</span>'
                     : `<strong>${money.format(row.costCorrection || 0)}</strong>`}
                 </td>
-                <td class="${Math.abs(Number(row.otherQty || 0)) > 0.000001 || Math.abs(Number(row.otherAmt || 0)) > 0.01 ? 'turnover-other-cell' : ''}">
+                <td class="${hasMovement(row.otherQty, row.otherAmt) ? 'turnover-other-cell' : ''}">
                   ${pairValue(row.otherQty, row.otherAmt)}
                 </td>
                 <td class="turnover-end-cell">
