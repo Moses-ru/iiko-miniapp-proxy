@@ -1580,4 +1580,98 @@ button:disabled {
     flex-direction: column;
   }
 }
-\n\n/* v56 — dark iikoOffice theme */\nhtml, body { background: #090a0c; }\n.app-header {\n  background: rgba(9,10,12,.92);\n  border-bottom-color: #20242b;\n}\n.menu-button, .icon-button { background: #15181d; color: #f4f6f8; box-shadow: none; }\n.menu-button span { background: #f4f6f8; }\n.brand__mark {\n  display: grid;\n  width: 44px; height: 44px;\n  background: #000;\n  border: 1px solid #222831;\n  box-shadow: 0 8px 26px rgba(0,0,0,.38);\n  overflow: hidden;\n}\n.brand__mark img { width: 27px; height: 29px; object-fit: contain; }\n.refresh-button { background: #171a20; color: #f4f6f8; border: 1px solid #252a32; }\n.controls-panel, .period-panel, .content-panel, .summary-card, .document-detail, .dish-row, .osv-mobile-card {\n  background: #111317;\n  border-color: #252a32;\n}\n.field, .search-field { background: #0d0f12; border-color: #2a3039; }\n.field select, .field input, .search-field input { color: #f4f6f8; }\n.search-field input::placeholder { color: #687180; }\n.filter-chip { background: #14171c; color: #cbd2dc; border-color: #2a3039; }\n.filter-chip.active { background: #f4f6f8; color: #090a0c; border-color: #f4f6f8; }\n.filter-chip--danger { color: #ff7882; }\n.side-menu { background: #0d0f12; color: #f4f6f8; border-right: 1px solid #252a32; }\n.menu-item { color: #aeb7c4; }\n.menu-item.active { background: #1a1e24; color: #fff; }\n.menu-backdrop { background: rgba(0,0,0,.64); }\n.balance-row, .document-row, .document-item, .dish-ingredient, .dish-facts > div, .dish-technology {\n  background: #111317; border-color: #252a32;\n}\n.dish-row:hover, .document-row:hover { background: #171a20; }\n.status-badge, .store-badge { background: #1a1e24; color: #e5e9ef; }\n.value-secondary, .product-meta, .document-item__name span, .dish-row__main span, .document-detail__header p, .turnover-cost { color: #8f98a8; }\n.turnover-table th { background: #0d0f12; color: #9aa4b2; }\n.turnover-table td { border-color: #252a32; }\n.turnover-end-cell { background: rgba(255,255,255,.035); }\n.turnover-other-cell:not(:empty) { background: rgba(255,184,77,.08); }\n.empty-state, .loading { color: #aab3c0; }\n.toast { background: #f4f6f8; color: #090a0c; }\n::-webkit-scrollbar { width: 10px; height: 10px; }\n::-webkit-scrollbar-track { background: #090a0c; }\n::-webkit-scrollbar-thumb { background: #303640; border-radius: 10px; border: 2px solid #090a0c; }\n@media (max-width: 760px) {\n  .app-main { padding-left: 10px; padding-right: 10px; }\n  .brand__mark { display: grid; }\n  .osv-mobile-card { box-shadow: none; }\n}\n
+
+/* v57 — dark iikoOffice theme */
+html, body { background: #090a0c; }
+.app-header {
+  background: rgba(9,10,12,.92);
+  border-bottom-color: #20242b;
+}
+.menu-button, .icon-button { background: #15181d; color: #f4f6f8; box-shadow: none; }
+.menu-button span { background: #f4f6f8; }
+.brand__mark {
+  display: grid;
+  width: 44px; height: 44px;
+  background: #000;
+  border: 1px solid #222831;
+  box-shadow: 0 8px 26px rgba(0,0,0,.38);
+  overflow: hidden;
+}
+.brand__mark img { width: 27px; height: 29px; object-fit: contain; }
+.refresh-button { background: #171a20; color: #f4f6f8; border: 1px solid #252a32; }
+.controls-panel, .period-panel, .content-panel, .summary-card, .document-detail, .dish-row, .osv-mobile-card {
+  background: #111317;
+  border-color: #252a32;
+}
+.field, .search-field { background: #0d0f12; border-color: #2a3039; }
+.field select, .field input, .search-field input { color: #f4f6f8; }
+.search-field input::placeholder { color: #687180; }
+.filter-chip { background: #14171c; color: #cbd2dc; border-color: #2a3039; }
+.filter-chip.active { background: #f4f6f8; color: #090a0c; border-color: #f4f6f8; }
+.filter-chip--danger { color: #ff7882; }
+.side-menu { background: #0d0f12; color: #f4f6f8; border-right: 1px solid #252a32; }
+.menu-item { color: #aeb7c4; }
+.menu-item.active { background: #1a1e24; color: #fff; }
+.menu-backdrop { background: rgba(0,0,0,.64); }
+.balance-row, .document-row, .document-item, .dish-ingredient, .dish-facts > div, .dish-technology {
+  background: #111317; border-color: #252a32;
+}
+.dish-row:hover, .document-row:hover { background: #171a20; }
+.status-badge, .store-badge { background: #1a1e24; color: #e5e9ef; }
+.value-secondary, .product-meta, .document-item__name span, .dish-row__main span, .document-detail__header p, .turnover-cost { color: #8f98a8; }
+.turnover-table th { background: #0d0f12; color: #9aa4b2; }
+.turnover-table td { border-color: #252a32; }
+.turnover-end-cell { background: rgba(255,255,255,.035); }
+.turnover-other-cell:not(:empty) { background: rgba(255,184,77,.08); }
+.empty-state, .loading { color: #aab3c0; }
+.toast { background: #f4f6f8; color: #090a0c; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #090a0c; }
+::-webkit-scrollbar-thumb { background: #303640; border-radius: 10px; border: 2px solid #090a0c; }
+@media (max-width: 760px) {
+  .app-main { padding-left: 10px; padding-right: 10px; }
+  .brand__mark { display: grid; }
+  .osv-mobile-card { box-shadow: none; }
+}
+
+
+/* v57 — logo sizing */
+.brand__mark {
+  display: grid !important;
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 13px;
+  background: #000 !important;
+  border: 1px solid #252a32;
+}
+
+.brand__mark img {
+  display: block !important;
+  width: 26px !important;
+  height: 29px !important;
+  max-width: 26px !important;
+  max-height: 29px !important;
+  object-fit: contain;
+}
+
+@media (max-width: 760px) {
+  .brand__mark {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+  }
+
+  .brand__mark img {
+    width: 23px !important;
+    height: 25px !important;
+  }
+}

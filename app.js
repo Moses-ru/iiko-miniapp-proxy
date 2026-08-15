@@ -837,6 +837,52 @@ function displayText(value, fallback = '') {
   return fallback || String(value);
 }
 
+
+function recipeMeasure(value, unit) {
+  const n = Number(value ?? 0);
+  const rawUnit = String(unit || '').trim();
+  const u = rawUnit.toLocaleLowerCase('ru-RU');
+
+  if (!Number.isFinite(n)) {
+    return `${displayText(value, '0')} ${rawUnit}`.trim();
+  }
+
+  // iikoOffice commonly stores recipe weights in kg and liquids in liters.
+  // On recipe cards we show them in user-friendly grams / milliliters.
+  if (u === 'кг' || u === 'kg') {
+    return `${fmt.format(n * 1000)} г`;
+  }
+
+  if (u === 'л' || u === 'l' || u === 'литр' || u === 'литры') {
+    return `${fmt.format(n * 1000)} мл`;
+  }
+
+  if (u === 'г' || u === 'гр' || u === 'g') {
+    return `${fmt.format(n)} г`;
+  }
+
+  if (u === 'мл' || u === 'ml') {
+    return `${fmt.format(n)} мл`;
+  }
+
+  return `${fmt.format(n)}${rawUnit ? ` ${rawUnit}` : ''}`;
+}
+
+function shortRecipeDate(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (!match) return shortOfficeDate(value);
+
+  const year = Number(match[1]);
+
+  if (year >= 2100) {
+    return 'Бессрочно';
+  }
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
 function ruProductType(type) {
   const value = String(type || '').toUpperCase();
 
@@ -998,8 +1044,8 @@ function renderDishDetail() {
 
       ${(dish.recipeDateFrom || dish.recipeDateTo || dish.cookingPlaceType) ? `
         <div class="dish-facts">
-          <div><span>Техкарта с</span><strong>${escapeHtml(shortOfficeDate(dish.recipeDateFrom))}</strong></div>
-          <div><span>Техкарта до</span><strong>${escapeHtml(shortOfficeDate(dish.recipeDateTo))}</strong></div>
+          <div><span>Техкарта с</span><strong>${escapeHtml(shortRecipeDate(dish.recipeDateFrom))}</strong></div>
+          <div><span>Техкарта до</span><strong>${escapeHtml(shortRecipeDate(dish.recipeDateTo))}</strong></div>
         </div>
       ` : ''}
 
@@ -1020,16 +1066,16 @@ function renderDishDetail() {
                 <strong>${escapeHtml(displayText(item.name, item.productId || 'Ингредиент'))}</strong>
               </div>
               <div class="ingredient-weight">
-                <strong>${fmt.format(item.gross ?? item.amount ?? 0)}</strong>
-                <span>брутто ${escapeHtml(item.unit || '')}</span>
+                <strong>${escapeHtml(recipeMeasure(item.gross ?? item.amount ?? 0, item.unit))}</strong>
+                <span>брутто</span>
               </div>
               <div class="ingredient-weight">
-                <strong>${fmt.format(item.net ?? 0)}</strong>
-                <span>нетто ${escapeHtml(item.unit || '')}</span>
+                <strong>${escapeHtml(recipeMeasure(item.net ?? 0, item.unit))}</strong>
+                <span>нетто</span>
               </div>
               <div class="ingredient-weight">
-                <strong>${fmt.format(item.out ?? 0)}</strong>
-                <span>выход ${escapeHtml(item.unit || '')}</span>
+                <strong>${escapeHtml(recipeMeasure(item.out ?? 0, item.unit))}</strong>
+                <span>выход</span>
               </div>
             </div>
           `).join('')}
