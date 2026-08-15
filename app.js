@@ -47,7 +47,7 @@ const state = {
   dishesSource: '',
   turnoverRows: [],
   turnoverLoading: false,
-  turnoverMode: 'amount'
+  turnoverMode: 'both'
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -971,6 +971,47 @@ function renderDishDetail() {
   });
 }
 
+
+async function apiTurnover({ forceRefresh = false } = {}) {
+  const selectedStore = LIVE_STORES.find((store) =>
+    String(store.id) === String(state.storeId)
+  ) || LIVE_STORES[0];
+
+  const params = new URLSearchParams({
+    store: selectedStore.name,
+    from: state.from,
+    to: state.to
+  });
+
+  if (forceRefresh) {
+    params.set('_', String(Date.now()));
+  }
+
+  const response = await fetch(
+    `${cfg.workerUrl}/api/turnover?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' }
+    }
+  );
+
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error(`Worker вернул не JSON (HTTP ${response.status})`);
+  }
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+
+  return payload;
+}
+
 async function loadTurnover({ forceRefresh = false } = {}) {
   if (state.turnoverLoading) return;
   state.turnoverLoading = true;
@@ -1003,78 +1044,105 @@ function turnoverFilteredRows() {
 
 function renderTurnover() {
   configureMainControls({
-    showStore: false,
+    showStore: true,
     showBalanceFilters: false,
     showDates: true
   });
 
   const rows = turnoverFilteredRows();
 
-  const open = rows.reduce((sum, x) => sum + Number(x.openAmt || 0), 0);
-  const purchase = rows.reduce((sum, x) => sum + Number(x.purchaseAmt || 0), 0);
-  const usage = rows.reduce((sum, x) => sum + Number(x.usageAmt || 0), 0);
-  const close = rows.reduce((sum, x) => sum + Number(x.closeAmt || 0), 0);
+  const openQty = rows.reduce((sum, x) => sum + Number(x.openQty || 0), 0);
+  const openAmt = rows.reduce((sum, x) => sum + Number(x.openAmt || 0), 0);
+  const closeQty = rows.reduce((sum, x) => sum + Number(x.closeQty || 0), 0);
+  const closeAmt = rows.reduce((sum, x) => sum + Number(x.closeAmt || 0), 0);
 
   metrics([
-    ['Начальный остаток', money.format(open)],
-    ['Приход', money.format(purchase)],
-    ['Расход', money.format(usage)],
-    ['Конечный остаток', money.format(close)]
+    ['Начальный остаток', fmt.format(openQty)],
+    ['Стоимость на начало', money.format(openAmt)],
+    ['Конечный остаток', fmt.format(closeQty)],
+    ['Стоимость остатка', money.format(closeAmt)]
   ]);
+
+  const mode = state.turnoverMode;
+
+  const pairValue = (qty, amt) => {
+    if (mode === 'qty') {
+      return `<strong>${fmt.format(qty || 0)}</strong>`;
+    }
+
+    if (mode === 'amount') {
+      return `<strong>${money.format(amt || 0)}</strong>`;
+    }
+
+    return `
+      <strong>${fmt.format(qty || 0)}</strong>
+      <span class="turnover-cost">${money.format(amt || 0)}</span>
+    `;
+  };
 
   $('#content').innerHTML = `
     <div class="document-toolbar">
       <div class="filter-chips">
-        <button class="filter-chip ${state.turnoverMode === 'amount' ? 'active' : ''}"
-          type="button" data-turnover-mode="amount">Суммы ₽</button>
-        <button class="filter-chip ${state.turnoverMode === 'qty' ? 'active' : ''}"
+        <button class="filter-chip ${mode === 'both' ? 'active' : ''}"
+          type="button" data-turnover-mode="both">Количество + ₽</button>
+        <button class="filter-chip ${mode === 'qty' ? 'active' : ''}"
           type="button" data-turnover-mode="qty">Количество</button>
+        <button class="filter-chip ${mode === 'amount' ? 'active' : ''}"
+          type="button" data-turnover-mode="amount">Суммы ₽</button>
       </div>
     </div>
 
     ${rows.length ? `
       <div class="turnover-scroll">
-        <table class="turnover-table">
+        <table class="turnover-table turnover-table--osv">
           <thead>
             <tr>
               <th>Товар</th>
               <th>Начало</th>
               <th>Приход</th>
-              <th>Расход</th>
-              <th>Потери</th>
-              <th>Недостача</th>
+              <th>Продажи</th>
+              <th>Перемещения</th>
+              <th>Списания</th>
+              <th>Возвраты</th>
               <th>Излишек</th>
+              <th>Недостача</th>
               <th>Конец</th>
             </tr>
           </thead>
           <tbody>
-            ${rows.map((row) => {
-              const q = state.turnoverMode === 'qty';
-              const val = (prefix) => q ? row[`${prefix}Qty`] : row[`${prefix}Amt`];
-              const format = (v) => q ? fmt.format(v || 0) : money.format(v || 0);
-              return `
-                <tr>
-                  <td>
-                    <strong>${escapeHtml(row.name)}</strong>
-                    <span>${escapeHtml(row.code || '')}${row.unit ? ` · ${escapeHtml(row.unit)}` : ''}</span>
-                  </td>
-                  <td>${format(val('open'))}</td>
-                  <td>${format(val('purchase'))}</td>
-                  <td>${format(val('usage'))}</td>
-                  <td>${format(val('waste'))}</td>
-                  <td class="${val('shortage') < 0 || val('shortage') > 0 ? 'negative' : ''}">${format(val('shortage'))}</td>
-                  <td>${format(val('surplus'))}</td>
-                  <td><strong>${format(val('close'))}</strong></td>
-                </tr>
-              `;
-            }).join('')}
+            ${rows.map((row) => `
+              <tr>
+                <td>
+                  <strong>${escapeHtml(row.name)}</strong>
+                  <span>
+                    ${escapeHtml(row.code || '')}
+                    ${row.unit ? ` · ${escapeHtml(row.unit)}` : ''}
+                    ${row.category ? ` · ${escapeHtml(row.category)}` : ''}
+                  </span>
+                </td>
+
+                <td>${pairValue(row.openQty, row.openAmt)}</td>
+                <td>${pairValue(row.purchaseQty, row.purchaseAmt)}</td>
+                <td>${pairValue(row.salesQty, row.salesAmt)}</td>
+                <td>${pairValue(row.transferQty, row.transferAmt)}</td>
+                <td>${pairValue(row.writeoffQty, row.writeoffAmt)}</td>
+                <td>${pairValue(row.returnedQty, row.returnedAmt)}</td>
+                <td>${pairValue(row.surplusQty, row.surplusAmt)}</td>
+                <td class="${row.shortageQty || row.shortageAmt ? 'negative' : ''}">
+                  ${pairValue(row.shortageQty, row.shortageAmt)}
+                </td>
+                <td class="turnover-end-cell">
+                  ${pairValue(row.closeQty, row.closeAmt)}
+                </td>
+              </tr>
+            `).join('')}
           </tbody>
         </table>
       </div>
     ` : `
       <div class="empty-state">
         <strong>Нет данных за период</strong>
-        Измените даты или поиск.
+        Измените склад, даты или поиск.
       </div>
     `}
   `;
@@ -1194,6 +1262,9 @@ $('#storeFilter').addEventListener('change', (event) => {
   if (state.tab === 'balances') {
     state.liveStockLoaded = false;
     loadBalances();
+  } else if (state.tab === 'turnover') {
+    state.turnoverRows = [];
+    loadTurnover();
   } else {
     render();
   }

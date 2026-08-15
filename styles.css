@@ -1333,3 +1333,30 @@ button:disabled {
     margin-bottom: 2px;
   }
 }
+
+
+/* v49 — ОСВ: количество + стоимость */
+.turnover-table--osv td:not(:first-child) {
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.turnover-table--osv td:not(:first-child) strong {
+  display: block;
+}
+
+.turnover-cost {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text-muted, #6b7280);
+}
+
+.turnover-end-cell {
+  background: rgba(15, 118, 110, 0.045);
+}
+
+.turnover-end-cell strong {
+  font-size: 15px;
+}
