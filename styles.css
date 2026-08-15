@@ -1360,3 +1360,17 @@ button:disabled {
 .turnover-end-cell strong {
   font-size: 15px;
 }
+
+
+/* v50 */
+.turnover-note {
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted, #6b7280);
+  border-bottom: 1px solid rgba(148, 163, 184, .25);
+}
+
+.turnover-other-cell:not(:empty) {
+  background: rgba(245, 158, 11, .055);
+}

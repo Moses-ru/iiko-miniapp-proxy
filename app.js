@@ -1093,6 +1093,11 @@ function renderTurnover() {
     </div>
 
     ${rows.length ? `
+      <div class="turnover-note">
+        ОСВ строится в расширенном режиме iikoOffice.
+        Знаки движений показаны ровно так, как их возвращает сервер.
+        «Прочее» — только контрольная разница после всех расширенных колонок.
+      </div>
       <div class="turnover-scroll">
         <table class="turnover-table turnover-table--osv">
           <thead>
@@ -1103,9 +1108,15 @@ function renderTurnover() {
               <th>Продажи</th>
               <th>Перемещения</th>
               <th>Списания</th>
+              <th>Инвентаризация</th>
+              <th>Расх. накладные</th>
+              <th>Производство</th>
+              <th>Преобразование</th>
               <th>Возвраты</th>
-              <th>Излишек</th>
-              <th>Недостача</th>
+              <th>Возврат прихода</th>
+              <th>Разборка</th>
+              <th>Корр. себестоимости</th>
+              <th>Прочее</th>
               <th>Конец</th>
             </tr>
           </thead>
@@ -1126,10 +1137,20 @@ function renderTurnover() {
                 <td>${pairValue(row.salesQty, row.salesAmt)}</td>
                 <td>${pairValue(row.transferQty, row.transferAmt)}</td>
                 <td>${pairValue(row.writeoffQty, row.writeoffAmt)}</td>
+                <td>${pairValue(row.inventoryQty, row.inventoryAmt)}</td>
+                <td>${pairValue(row.outgoingInvoiceQty, row.outgoingInvoiceAmt)}</td>
+                <td>${pairValue(row.productionQty, row.productionAmt)}</td>
+                <td>${pairValue(row.transformationQty, row.transformationAmt)}</td>
                 <td>${pairValue(row.returnedQty, row.returnedAmt)}</td>
-                <td>${pairValue(row.surplusQty, row.surplusAmt)}</td>
-                <td class="${row.shortageQty || row.shortageAmt ? 'negative' : ''}">
-                  ${pairValue(row.shortageQty, row.shortageAmt)}
+                <td>${pairValue(row.incomingReturnedQty, row.incomingReturnedAmt)}</td>
+                <td>${pairValue(row.disassembleQty, row.disassembleAmt)}</td>
+                <td>
+                  ${mode === 'qty'
+                    ? '<span class="turnover-cost">—</span>'
+                    : `<strong>${money.format(row.costCorrection || 0)}</strong>`}
+                </td>
+                <td class="${Math.abs(Number(row.otherQty || 0)) > 0.000001 || Math.abs(Number(row.otherAmt || 0)) > 0.01 ? 'turnover-other-cell' : ''}">
+                  ${pairValue(row.otherQty, row.otherAmt)}
                 </td>
                 <td class="turnover-end-cell">
                   ${pairValue(row.closeQty, row.closeAmt)}
