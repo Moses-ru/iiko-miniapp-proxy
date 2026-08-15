@@ -1,19 +1,19 @@
 :root {
-  color-scheme: light;
-  --bg: #f5f7fb;
-  --surface: #ffffff;
-  --surface-soft: #f8fafc;
-  --text: #172033;
-  --muted: #758096;
-  --border: #e4e8f0;
-  --accent: #2f7df6;
-  --accent-soft: #eaf2ff;
-  --accent-strong: #1769e8;
-  --danger: #e9424d;
-  --danger-soft: #fff0f1;
-  --positive: #109b76;
-  --positive-soft: #e9f8f3;
-  --shadow: 0 14px 38px rgba(29, 43, 76, 0.08);
+  color-scheme: dark;
+  --bg: #090a0c;
+  --surface: #111317;
+  --surface-soft: #171a20;
+  --text: #f4f6f8;
+  --muted: #8f98a8;
+  --border: #252a32;
+  --accent: #f4f6f8;
+  --accent-soft: #20242b;
+  --accent-strong: #ffffff;
+  --danger: #ff5a67;
+  --danger-soft: rgba(255, 90, 103, .10);
+  --positive: #43d6a6;
+  --positive-soft: rgba(67, 214, 166, .10);
+  --shadow: 0 18px 48px rgba(0, 0, 0, .28);
   --radius: 18px;
   --radius-sm: 13px;
 }
@@ -1580,3 +1580,4 @@ button:disabled {
     flex-direction: column;
   }
 }
+\n\n/* v56 — dark iikoOffice theme */\nhtml, body { background: #090a0c; }\n.app-header {\n  background: rgba(9,10,12,.92);\n  border-bottom-color: #20242b;\n}\n.menu-button, .icon-button { background: #15181d; color: #f4f6f8; box-shadow: none; }\n.menu-button span { background: #f4f6f8; }\n.brand__mark {\n  display: grid;\n  width: 44px; height: 44px;\n  background: #000;\n  border: 1px solid #222831;\n  box-shadow: 0 8px 26px rgba(0,0,0,.38);\n  overflow: hidden;\n}\n.brand__mark img { width: 27px; height: 29px; object-fit: contain; }\n.refresh-button { background: #171a20; color: #f4f6f8; border: 1px solid #252a32; }\n.controls-panel, .period-panel, .content-panel, .summary-card, .document-detail, .dish-row, .osv-mobile-card {\n  background: #111317;\n  border-color: #252a32;\n}\n.field, .search-field { background: #0d0f12; border-color: #2a3039; }\n.field select, .field input, .search-field input { color: #f4f6f8; }\n.search-field input::placeholder { color: #687180; }\n.filter-chip { background: #14171c; color: #cbd2dc; border-color: #2a3039; }\n.filter-chip.active { background: #f4f6f8; color: #090a0c; border-color: #f4f6f8; }\n.filter-chip--danger { color: #ff7882; }\n.side-menu { background: #0d0f12; color: #f4f6f8; border-right: 1px solid #252a32; }\n.menu-item { color: #aeb7c4; }\n.menu-item.active { background: #1a1e24; color: #fff; }\n.menu-backdrop { background: rgba(0,0,0,.64); }\n.balance-row, .document-row, .document-item, .dish-ingredient, .dish-facts > div, .dish-technology {\n  background: #111317; border-color: #252a32;\n}\n.dish-row:hover, .document-row:hover { background: #171a20; }\n.status-badge, .store-badge { background: #1a1e24; color: #e5e9ef; }\n.value-secondary, .product-meta, .document-item__name span, .dish-row__main span, .document-detail__header p, .turnover-cost { color: #8f98a8; }\n.turnover-table th { background: #0d0f12; color: #9aa4b2; }\n.turnover-table td { border-color: #252a32; }\n.turnover-end-cell { background: rgba(255,255,255,.035); }\n.turnover-other-cell:not(:empty) { background: rgba(255,184,77,.08); }\n.empty-state, .loading { color: #aab3c0; }\n.toast { background: #f4f6f8; color: #090a0c; }\n::-webkit-scrollbar { width: 10px; height: 10px; }\n::-webkit-scrollbar-track { background: #090a0c; }\n::-webkit-scrollbar-thumb { background: #303640; border-radius: 10px; border: 2px solid #090a0c; }\n@media (max-width: 760px) {\n  .app-main { padding-left: 10px; padding-right: 10px; }\n  .brand__mark { display: grid; }\n  .osv-mobile-card { box-shadow: none; }\n}\n

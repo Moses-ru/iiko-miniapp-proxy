@@ -524,27 +524,20 @@ function renderBalanceRow(row) {
 }
 
 async function loadDocuments({ forceRefresh = false } = {}) {
-  if (state.documentsLoading) return;
-
-  state.documentsLoading = true;
-  $('#content').innerHTML = '<div class="loading">Получаем документы из iikoWeb…</div>';
-
-  try {
-    const payload = await apiDocuments({ forceRefresh });
-    state.documents = payload.documents || [];
-    renderDocuments();
-  } catch (error) {
-    console.error(error);
-    $('#content').innerHTML = `
-      <div class="empty-state">
-        <strong>Не удалось загрузить документы</strong>
-        ${escapeHtml(error.message)}
-      </div>
-    `;
-    toast(error.message);
-  } finally {
-    state.documentsLoading = false;
-  }
+  state.documentsLoading = false;
+  configureMainControls({
+    showStore: false,
+    showBalanceFilters: false,
+    showDates: false
+  });
+  metrics([]);
+  $('#connectionStatus').textContent = 'iikoOffice · раздел готовим';
+  $('#content').innerHTML = `
+    <div class="empty-state">
+      <strong>Документы переводим на iikoOffice</strong>
+      Старую интеграцию с iikoWeb отключили. Следующий захват Fiddler подключим напрямую к iikoOffice.
+    </div>
+  `;
 }
 
 function filteredDocuments() {
@@ -799,7 +792,7 @@ async function loadDishes({ forceRefresh = false } = {}) {
     state.dishes = payload.dishes || [];
     state.dishesSource = payload.source || '';
     $('#connectionStatus').textContent =
-      `${payload.source || 'Источник'} · ${payload.cached ? 'кэш · ' : ''}обновлено ${formatUpdatedTime(payload.updatedAt || new Date().toISOString())}`;
+      `iikoOffice · ${payload.cached ? 'кэш · ' : ''}обновлено ${formatUpdatedTime(payload.updatedAt || new Date().toISOString())}`;
     renderDishes();
   } catch (error) {
     console.error(error);
@@ -963,6 +956,15 @@ async function openDish(productId) {
   }
 }
 
+
+function shortOfficeDate(value) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return text;
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
 function renderDishDetail() {
   const dish = state.dishDetail;
   if (!dish) return renderDishes();
@@ -994,11 +996,10 @@ function renderDishDetail() {
         </div>
       </div>
 
-      ${(dish.recipeDateFrom || dish.recipeDateTo || dish.cookingPlaceType || dish.source) ? `
+      ${(dish.recipeDateFrom || dish.recipeDateTo || dish.cookingPlaceType) ? `
         <div class="dish-facts">
-          <div><span>Техкарта с</span><strong>${escapeHtml(dish.recipeDateFrom || '—')}</strong></div>
-          <div><span>Техкарта до</span><strong>${escapeHtml(dish.recipeDateTo || '—')}</strong></div>
-          <div><span>Источник</span><strong>${escapeHtml(dish.source || '—')}</strong></div>
+          <div><span>Техкарта с</span><strong>${escapeHtml(shortOfficeDate(dish.recipeDateFrom))}</strong></div>
+          <div><span>Техкарта до</span><strong>${escapeHtml(shortOfficeDate(dish.recipeDateTo))}</strong></div>
         </div>
       ` : ''}
 
@@ -1017,7 +1018,6 @@ function renderDishDetail() {
             <div class="dish-ingredient dish-ingredient--server">
               <div class="document-item__name">
                 <strong>${escapeHtml(displayText(item.name, item.productId || 'Ингредиент'))}</strong>
-                <span>${escapeHtml(item.productId || '')}</span>
               </div>
               <div class="ingredient-weight">
                 <strong>${fmt.format(item.gross ?? item.amount ?? 0)}</strong>
@@ -1532,13 +1532,13 @@ if (tg) {
 
   if (tg.setHeaderColor) {
     try {
-      tg.setHeaderColor('#f5f7fb');
+      tg.setHeaderColor('#090a0c');
     } catch {}
   }
 
   if (tg.setBackgroundColor) {
     try {
-      tg.setBackgroundColor('#f5f7fb');
+      tg.setBackgroundColor('#090a0c');
     } catch {}
   }
 }
