@@ -1552,3 +1552,31 @@ button:disabled {
     font-size: 11px;
   }
 }
+
+
+/* v53 — номенклатура */
+.nomenclature-price-stack {
+  min-width: 140px;
+  text-align: right;
+}
+.nomenclature-price-stack > span,
+.nomenclature-price-stack > small {
+  display: block;
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+}
+.nomenclature-price-stack > strong {
+  display: block;
+  margin: 3px 0;
+}
+@media (max-width: 760px) {
+  .nomenclature-price-stack {
+    min-width: 0;
+    text-align: left;
+    margin-top: 10px;
+  }
+  .document-detail__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -754,11 +754,45 @@ function renderDocumentDetail() {
 }
 
 
+
+async function apiDishes({ forceRefresh = false } = {}) {
+  const params = new URLSearchParams();
+  if (forceRefresh) params.set('refresh', '1');
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const response = await fetch(`${cfg.workerUrl}/api/nomenclature${suffix}`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' }
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  return {
+    ...payload,
+    dishes: payload.items || []
+  };
+}
+
+async function apiDishDetail(productId) {
+  const response = await fetch(
+    `${cfg.workerUrl}/api/nomenclature/${encodeURIComponent(productId)}`,
+    { cache: 'no-store', headers: { Accept: 'application/json' } }
+  );
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  return {
+    ...payload,
+    dish: payload.item
+  };
+}
+
 async function loadDishes({ forceRefresh = false } = {}) {
   if (state.dishesLoading) return;
   state.dishesLoading = true;
 
-  $('#content').innerHTML = '<div class="loading">Загружаем номенклатуру блюд…</div>';
+  $('#content').innerHTML = '<div class="loading">Загружаем блюда, товары и полуфабрикаты…</div>';
 
   try {
     const payload = await apiDishes({ forceRefresh });
@@ -771,7 +805,7 @@ async function loadDishes({ forceRefresh = false } = {}) {
     console.error(error);
     $('#content').innerHTML = `
       <div class="empty-state">
-        <strong>Не удалось загрузить блюда</strong>
+        <strong>Не удалось загрузить номенклатуру</strong>
         ${escapeHtml(error.message)}
       </div>
     `;
@@ -809,20 +843,20 @@ function renderDishes() {
   const rows = filteredDishes();
   const dishesCount = rows.filter((x) => x.type === 'DISH').length;
   const prepCount = rows.filter((x) => x.type === 'PREPARED').length;
-  const modifierCount = rows.filter((x) => x.type === 'MODIFIER').length;
+  const goodsCount = rows.filter((x) => x.type === 'GOODS').length;
 
   metrics([
     ['Всего', fmt.format(rows.length)],
     ['Блюд', fmt.format(dishesCount)],
     ['Полуфабрикатов', fmt.format(prepCount)],
-    ['Модификаторов', fmt.format(modifierCount)]
+    ['Товаров', fmt.format(goodsCount)]
   ]);
 
   const types = [
     ['all', 'Все'],
     ['DISH', 'Блюда'],
-    ['PREPARED', 'Полуфабрикаты'],
-    ['MODIFIER', 'Модификаторы']
+    ['GOODS', 'Товары'],
+    ['PREPARED', 'Полуфабрикаты']
   ];
 
   $('#content').innerHTML = `
@@ -912,15 +946,20 @@ function renderDishDetail() {
             ${dish.unit ? ` · ${escapeHtml(dish.unit)}` : ''}
           </p>
         </div>
-        <strong class="document-detail__sum">
-          ${dish.menuPrice ? money.format(dish.menuPrice) : '—'}
-        </strong>
+        <div class="nomenclature-price-stack">
+          <span>Себестоимость</span>
+          <strong class="document-detail__sum">
+            ${Number.isFinite(Number(dish.costPrice)) ? money.format(Number(dish.costPrice)) : '—'}
+          </strong>
+          ${dish.menuPrice ? `<small>Цена меню: ${money.format(dish.menuPrice)}</small>` : ''}
+        </div>
       </div>
 
-      ${(dish.recipeDateFrom || dish.cookingPlaceType) ? `
+      ${(dish.recipeDateFrom || dish.recipeDateTo || dish.cookingPlaceType || dish.source) ? `
         <div class="dish-facts">
           <div><span>Техкарта с</span><strong>${escapeHtml(dish.recipeDateFrom || '—')}</strong></div>
-          <div><span>Место приготовления</span><strong>${escapeHtml(dish.cookingPlaceType || '—')}</strong></div>
+          <div><span>Техкарта до</span><strong>${escapeHtml(dish.recipeDateTo || '—')}</strong></div>
+          <div><span>Источник</span><strong>${escapeHtml(dish.source || '—')}</strong></div>
         </div>
       ` : ''}
 
@@ -931,7 +970,7 @@ function renderDishDetail() {
         </div>
       ` : ''}
 
-      <div class="document-items-title">Состав · ${fmt.format(ingredients.length)}</div>
+      <div class="document-items-title">${dish.type === 'GOODS' ? 'Товар' : `Состав · ${fmt.format(ingredients.length)}`}</div>
 
       ${ingredients.length ? `
         <div class="document-items">
@@ -958,8 +997,10 @@ function renderDishDetail() {
         </div>
       ` : `
         <div class="empty-state">
-          <strong>Состав не найден</strong>
-          Для этой позиции iikoServer не вернул строки действующей техкарты.
+          <strong>${dish.type === 'GOODS' ? 'Техкарта не требуется' : 'Состав не найден'}</strong>
+          ${dish.type === 'GOODS'
+            ? 'Это товар. Для него показываются карточка номенклатуры и себестоимость.'
+            : 'Для этой позиции iikoOffice не вернул строки действующей техкарты.'}
         </div>
       `}
     </div>
@@ -1284,7 +1325,7 @@ function renderNotConnected() {
   const labels = {
     documents: 'Документы',
     inventories: 'Инвентаризации',
-    dishes: 'Блюда',
+    dishes: 'Номенклатура',
     turnover: 'ОСВ'
   };
 
@@ -1345,7 +1386,7 @@ function setTab(tab) {
   const placeholders = {
     balances: 'Товар, код, категория',
     documents: 'Номер, тип, склад, комментарий',
-    dishes: 'Блюдо, код, категория',
+    dishes: 'Блюдо, товар, полуфабрикат, код',
     turnover: 'Товар, код, категория'
   };
   $('#searchInput').placeholder = placeholders[tab] || 'Поиск';
