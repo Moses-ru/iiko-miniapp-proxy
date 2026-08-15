@@ -33,7 +33,7 @@ const state = {
   to: '',
   loading: false,
   page: 1,
-  pageSize: 20,
+  pageSize: 30,
   lastUpdatedAt: null,
   documents: [],
   documentsLoading: false,
@@ -159,9 +159,9 @@ async function apiLiveStock({ forceRefresh = false } = {}) {
 
   const params = new URLSearchParams({
     store: selectedStore.name,
-    q: state.query.trim(),
-    limit: String(state.pageSize),
-    offset: String((state.page - 1) * state.pageSize)
+    q: '',
+    limit: '5000',
+    offset: '0'
   });
 
   if (forceRefresh) {
@@ -209,33 +209,92 @@ function formatUpdatedTime(value) {
   });
 }
 
+const LIVE_STOCK_UI_CACHE_PREFIX = 'iiko-live-stock-ui-v44:';
+
+function liveStockUiCacheKey() {
+  return `${LIVE_STOCK_UI_CACHE_PREFIX}${state.storeId}|${state.page}|${state.pageSize}|${state.query.trim().toLocaleLowerCase('ru-RU')}`;
+}
+
+function readLiveStockUiCache() {
+  try {
+    const raw = localStorage.getItem(liveStockUiCacheKey());
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveLiveStockUiCache(payload) {
+  try {
+    localStorage.setItem(
+      liveStockUiCacheKey(),
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        items: payload.items || [],
+        pagination: payload.pagination || { total: 0 },
+        time: payload.time || new Date().toISOString()
+      })
+    );
+  } catch {
+    // localStorage may be unavailable in some embedded browsers.
+  }
+}
+
+function applyLiveStockPayload(payload, { cachedPreview = false } = {}) {
+  state.liveStockItems = payload.items || [];
+  state.liveStockTotal = Number(payload.pagination?.total || 0);
+  state.liveStockLoaded = true;
+  state.lastUpdatedAt = payload.time || payload.savedAt || new Date().toISOString();
+
+  if (cachedPreview) {
+    $('#connectionStatus').textContent =
+      `Сохранённые данные · обновляем…`;
+  } else {
+    $('#connectionStatus').textContent =
+      `iikoOffice ОСВ · 1 запрос на склад · ${formatUpdatedTime(state.lastUpdatedAt)}`;
+  }
+
+  renderBalances();
+}
+
 async function loadBalances({ forceRefresh = false, keepVisible = false } = {}) {
   if (state.liveStockLoading) return;
 
   state.liveStockLoading = true;
   $('#refreshBtn').disabled = true;
 
-  if (!keepVisible || !state.liveStockLoaded) {
-    $('#connectionStatus').textContent = 'Загрузка живых остатков…';
-    $('#summary').innerHTML = '';
-    $('#content').innerHTML =
-      '<div class="loading">Получаем текущие остатки из iikoServer…</div>';
-  } else {
-    $('#connectionStatus').textContent = 'Обновляем живые остатки…';
+  let showedCachedPreview = false;
+
+  if (!forceRefresh && (!keepVisible || !state.liveStockLoaded)) {
+    const cached = readLiveStockUiCache();
+
+    if (cached) {
+      applyLiveStockPayload(cached, { cachedPreview: true });
+      showedCachedPreview = true;
+    }
+  }
+
+  if (!showedCachedPreview) {
+    if (!keepVisible || !state.liveStockLoaded) {
+      $('#connectionStatus').textContent = 'Загрузка живых остатков…';
+      $('#summary').innerHTML = '';
+      $('#content').innerHTML =
+        '<div class="loading">Получаем всю ведомость склада одним запросом…</div>';
+    } else {
+      $('#connectionStatus').textContent = 'Обновляем живые остатки…';
+    }
   }
 
   try {
     const payload = await apiLiveStock({ forceRefresh });
 
-    state.liveStockItems = payload.items || [];
-    state.liveStockTotal = Number(payload.pagination?.total || 0);
-    state.liveStockLoaded = true;
-    state.lastUpdatedAt = payload.time || new Date().toISOString();
-
-    $('#connectionStatus').textContent =
-      `iikoServer · живые остатки · ${formatUpdatedTime(state.lastUpdatedAt)}`;
-
-    renderBalances();
+    saveLiveStockUiCache(payload);
+    applyLiveStockPayload(payload);
 
     if (forceRefresh) {
       toast('Живые остатки обновлены');
@@ -284,13 +343,22 @@ function fillStores() {
   select.value = state.storeId;
 }
 
-function getBalanceRows() {
+function getBalanceRows({ paged = true } = {}) {
   let rows = (state.liveStockItems || []).map((item) => ({
     ...item,
     quantity: Number.isFinite(Number(item.quantity))
       ? Number(item.quantity)
       : null
   }));
+
+  const q = state.query.trim().toLocaleLowerCase('ru-RU');
+
+  if (q) {
+    rows = rows.filter((row) =>
+      String(row.productName || '').toLocaleLowerCase('ru-RU').includes(q) ||
+      String(row.productNum || '').toLocaleLowerCase('ru-RU').includes(q)
+    );
+  }
 
   if (state.balanceFilter === 'stock') {
     rows = rows.filter((row) =>
@@ -304,7 +372,14 @@ function getBalanceRows() {
     );
   }
 
-  return rows;
+  state.liveStockTotal = rows.length;
+
+  if (!paged) {
+    return rows;
+  }
+
+  const start = (state.page - 1) * state.pageSize;
+  return rows.slice(start, start + state.pageSize);
 }
 
 function configureMainControls({
@@ -392,7 +467,7 @@ function renderBalances() {
   $('#prevPageBtn')?.addEventListener('click', () => {
     if (state.page > 1) {
       state.page -= 1;
-      loadBalances();
+      renderBalances();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   });
@@ -400,7 +475,7 @@ function renderBalances() {
   $('#nextPageBtn')?.addEventListener('click', () => {
     if (state.page < pageCount) {
       state.page += 1;
-      loadBalances();
+      renderBalances();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   });
@@ -1124,21 +1199,10 @@ $('#storeFilter').addEventListener('change', (event) => {
   }
 });
 
-let searchTimer = null;
-
 $('#searchInput').addEventListener('input', (event) => {
   state.query = event.target.value;
   state.page = 1;
-
-  if (state.tab === 'balances') {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      state.liveStockLoaded = false;
-      loadBalances();
-    }, 350);
-  } else {
-    render();
-  }
+  render();
 });
 
 $$('[data-balance-filter]').forEach((button) => {
