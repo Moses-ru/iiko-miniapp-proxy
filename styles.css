@@ -1981,3 +1981,16 @@ html, body { background: #090a0c; }
 
   .connection-button small { display: none; }
 }
+
+
+/* v64 */
+.owner-claim {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 2px;
+}
+
+#loginChoiceBox > .auth-divider {
+  margin: 3px 0;
+}

@@ -155,7 +155,7 @@ function applyConnectionToApp() {
   $('#connectionStatus').textContent = `${connection.name} · ${connection.roleLabel || ''}`;
   $('#accountName').textContent = authState.me?.user?.name || 'Пользователь';
 
-  populateStoreFilter();
+  fillStores();
   renderConnectionPanel();
   applyPermissions();
 }
@@ -248,6 +248,38 @@ async function loginWithExistingSession() {
   }
 }
 
+
+async function loadPublicConnections() {
+  const payload = await publicApi('/api/auth/connections');
+  const select = $('#loginConnection');
+
+  if (!select) return payload.connections || [];
+
+  const rows = payload.connections || [];
+
+  select.innerHTML = rows.map((connection) => `
+    <option value="${escAttr(connection.id)}">
+      ${escapeHtml(connection.name)}
+    </option>
+  `).join('');
+
+  return rows;
+}
+
+async function iikoLogin() {
+  const payload = await publicApi('/api/auth/iiko', {
+    method: 'POST',
+    body: JSON.stringify({
+      connectionId: $('#loginConnection').value,
+      login: $('#loginIikoLogin').value,
+      password: $('#loginIikoPassword').value
+    })
+  });
+
+  $('#loginIikoPassword').value = '';
+  saveAuth(payload.token, payload.me);
+}
+
 async function telegramLogin() {
   const initData = telegramInitData();
   if (!initData) {
@@ -264,6 +296,7 @@ async function telegramLogin() {
 
 async function initializeAuth() {
   showAuthGate();
+  setAuthError('');
 
   if (await loginWithExistingSession()) {
     return true;
@@ -273,26 +306,39 @@ async function initializeAuth() {
 
   if (!status.configured) {
     $('#authTitle').textContent = 'Первое подключение';
-    $('#authHint').textContent = 'Подключите первый iikoServer. Это делается один раз.';
+    $('#authHint').textContent =
+      'Владелец подключает первый iikoServer один раз.';
     $('#firstSetupForm').hidden = false;
-    $('#telegramLoginBox').hidden = true;
+    $('#loginChoiceBox').hidden = true;
+    $('#ownerClaimBox').hidden = true;
     return false;
   }
 
+  $('#firstSetupForm').hidden = true;
+  $('#loginChoiceBox').hidden = false;
+  $('#ownerClaimBox').hidden = true;
+
+  $('#authTitle').textContent = 'Вход';
+  $('#authHint').textContent =
+    'Войдите аккаунтом iiko или через Telegram.';
+
+  await loadPublicConnections();
+
+  // Inside Telegram try the mapped Telegram account automatically.
   if (telegramInitData()) {
     try {
       await telegramLogin();
       return true;
     } catch (error) {
       $('#authHint').textContent =
-        `${error.message} Если это ваш первый вход владельца в Telegram — введите код владельца ниже и нажмите «Войти владельцем».`;
+        `${error.message} Можно войти аккаунтом iiko ниже.`;
+      // One-time owner claim stays hidden from normal users.
+      if (/доступ|выдан/i.test(error.message)) {
+        $('#ownerClaimBox').hidden = false;
+      }
     }
-  } else {
-    $('#authHint').textContent = 'Откройте Mini App в Telegram или войдите владельцем для работы с ПК.';
   }
 
-  $('#firstSetupForm').hidden = true;
-  $('#telegramLoginBox').hidden = false;
   return false;
 }
 
@@ -634,6 +680,15 @@ function startFastLoad() {
 
 function fillStores() {
   const select = $('#storeFilter');
+  if (!select) return;
+
+  if (!Array.isArray(LIVE_STORES) || !LIVE_STORES.length) {
+    select.innerHTML = '<option value="">Склады не найдены</option>';
+    state.storeId = '';
+    select.value = '';
+    return;
+  }
+
   const previous = state.storeId || LIVE_STORES[0].id;
 
   select.innerHTML = LIVE_STORES.map((store) =>
@@ -1939,6 +1994,19 @@ $('#connectionBtn').addEventListener('click', openConnectionPanel);
 $('#closeConnectionPanel').addEventListener('click', closeConnectionPanel);
 $('#connectionPanelBackdrop').addEventListener('click', closeConnectionPanel);
 
+
+$('#iikoLoginForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setAuthError('');
+
+  try {
+    await iikoLogin();
+    await finishAuthorizedStartup();
+  } catch (error) {
+    setAuthError(error.message);
+  }
+});
+
 $('#telegramLoginBtn').addEventListener('click', async () => {
   setAuthError('');
   try {
@@ -2037,7 +2105,9 @@ $('#addUserForm').addEventListener('submit', async (event) => {
         telegramId: $('#newUserTelegramId').value,
         displayName: $('#newUserName').value,
         connectionId: $('#newUserConnection').value,
-        role: $('#newUserRole').value
+        role: $('#newUserRole').value,
+        iikoLogin: $('#newUserIikoLogin').value,
+        iikoPassword: $('#newUserIikoPassword').value
       })
     });
 
@@ -2048,7 +2118,9 @@ $('#addUserForm').addEventListener('submit', async (event) => {
 
     $('#newUserTelegramId').value = '';
     $('#newUserName').value = '';
-    toast('Доступ сохранён');
+    $('#newUserIikoLogin').value = '';
+    $('#newUserIikoPassword').value = '';
+    toast('Доступ и аккаунт iiko сохранены');
   } catch (error) {
     toast(error.message);
   }

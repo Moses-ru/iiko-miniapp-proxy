@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090a0c">
   <title>iiko Office</title>
-  <link rel="icon" type="image/svg+xml" href="./assets/app-icon.svg?v=61">
-  <link rel="apple-touch-icon" href="./assets/app-icon.svg?v=61">
+  <link rel="icon" type="image/svg+xml" href="./assets/app-icon.svg?v=64">
+  <link rel="apple-touch-icon" href="./assets/app-icon.svg?v=64">
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="./styles.css?v=61">
+  <link rel="stylesheet" href="./styles.css?v=64">
 </head>
 <body class="auth-pending">
 
   <section id="authGate" class="auth-gate">
     <div class="auth-card">
-      <div class="auth-logo"><img src="./assets/logo.svg?v=61" alt=""></div>
+      <div class="auth-logo"><img src="./assets/logo.svg?v=64" alt=""></div>
       <div class="auth-heading">
         <span>iiko Office</span>
         <h2 id="authTitle">Подключение</h2>
@@ -60,15 +60,49 @@
         <p class="auth-small">Логин и пароль передаются только Worker по HTTPS и сохраняются в D1 в зашифрованном виде.</p>
       </form>
 
-      <div id="telegramLoginBox" class="auth-form" hidden>
-        <button id="telegramLoginBtn" class="auth-primary" type="button">Войти через Telegram</button>
-        <div class="auth-divider"><span>или с компьютера</span></div>
-        <label>
-          <span>Код владельца</span>
-          <input id="ownerCode" type="password" autocomplete="one-time-code">
-        </label>
-        <button id="ownerLoginBtn" class="auth-secondary" type="button">Войти владельцем</button>
-        <p class="auth-small">Для сотрудников вход выполняется автоматически по Telegram. Код владельца нужен только для администрирования с ПК.</p>
+      <div id="loginChoiceBox" class="auth-form" hidden>
+        <form id="iikoLoginForm" class="auth-form">
+          <label>
+            <span>Сервер</span>
+            <select id="loginConnection" required></select>
+          </label>
+          <div class="auth-two">
+            <label>
+              <span>Логин iiko</span>
+              <input id="loginIikoLogin" autocomplete="username" required>
+            </label>
+            <label>
+              <span>Пароль iiko</span>
+              <input id="loginIikoPassword" type="password" autocomplete="current-password" required>
+            </label>
+          </div>
+          <button class="auth-primary" type="submit">Войти через iiko</button>
+        </form>
+
+        <div class="auth-divider"><span>либо</span></div>
+
+        <button id="telegramLoginBtn" class="auth-secondary" type="button">
+          Войти через Telegram
+        </button>
+
+        <p class="auth-small">
+          Для входа через Telegram владелец заранее привязывает ваш Telegram ID
+          к конкретному аккаунту iiko и роли.
+        </p>
+
+        <div id="ownerClaimBox" class="owner-claim" hidden>
+          <div class="auth-divider"><span>первичная привязка владельца</span></div>
+          <label>
+            <span>Код владельца</span>
+            <input id="ownerCode" type="password" autocomplete="one-time-code">
+          </label>
+          <button id="ownerLoginBtn" class="auth-secondary" type="button">
+            Привязать этот Telegram как владельца
+          </button>
+          <p class="auth-small">
+            Нужно только один раз, если первый сервер был настроен с компьютера.
+          </p>
+        </div>
       </div>
 
       <div id="authError" class="auth-error" hidden></div>
@@ -120,6 +154,8 @@
             <option value="MANAGING">Управляющий</option>
             <option value="OWNER">Владелец</option>
           </select>
+          <input id="newUserIikoLogin" placeholder="Логин iiko сотрудника" required>
+          <input id="newUserIikoPassword" type="password" placeholder="Пароль iiko сотрудника" required>
           <button class="auth-secondary" type="submit">Сохранить доступ</button>
         </form>
       </div>
@@ -185,7 +221,7 @@
     </button>
 
     <div class="brand">
-      <div class="brand__mark"><img src="./assets/logo.svg?v=61" alt=""></div>
+      <div class="brand__mark"><img src="./assets/logo.svg?v=64" alt=""></div>
       <div class="brand__text">
         <h1 id="pageTitle">iiko Office</h1>
         <p id="connectionStatus">Подключение…</p>
@@ -246,7 +282,7 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="./config.js?v=61"></script>
-  <script type="module" src="./app.js?v=61"></script>
+  <script src="./config.js?v=64"></script>
+  <script type="module" src="./app.js?v=64"></script>
 </body>
 </html>
