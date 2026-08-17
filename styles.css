@@ -55,7 +55,7 @@ button:disabled {
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
+  grid-template-columns: 52px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 13px;
   min-height: 76px;
@@ -582,7 +582,7 @@ button:disabled {
 
 @media (max-width: 780px) {
   .app-header {
-    grid-template-columns: 48px minmax(0, 1fr) auto;
+    grid-template-columns: 48px minmax(0, 1fr) auto auto;
     padding-left: 12px;
     padding-right: 12px;
   }

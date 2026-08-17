@@ -136,7 +136,13 @@ function applyConnectionToApp() {
   const connection = currentConnection();
   if (!connection) return;
 
-  LIVE_STORES = Array.isArray(connection.stores) ? connection.stores : [];
+  const discoveredStores =
+    Array.isArray(connection.stores) ? connection.stores : [];
+
+  if (discoveredStores.length) {
+    LIVE_STORES = discoveredStores;
+  }
+
   state.data.stores = LIVE_STORES;
 
   const previous = String(state.storeId || '');
@@ -278,7 +284,8 @@ async function initializeAuth() {
       await telegramLogin();
       return true;
     } catch (error) {
-      $('#authHint').textContent = error.message;
+      $('#authHint').textContent =
+        `${error.message} Если это ваш первый вход владельца в Telegram — введите код владельца ниже и нажмите «Войти владельцем».`;
     }
   } else {
     $('#authHint').textContent = 'Откройте Mini App в Telegram или войдите владельцем для работы с ПК.';
@@ -1410,6 +1417,10 @@ function renderDishDetail() {
 
 
 async function apiTurnover({ forceRefresh = false } = {}) {
+  if (!state.from || !state.to) {
+    setDefaultDates();
+  }
+
   const selectedStore = LIVE_STORES.find((store) =>
     String(store.id) === String(state.storeId)
   ) || LIVE_STORES[0];
@@ -1943,7 +1954,7 @@ $('#ownerLoginBtn').addEventListener('click', async () => {
   try {
     const payload = await publicApi('/api/auth/web-owner', {
       method: 'POST',
-      body: JSON.stringify({ setupCode: $('#ownerCode').value })
+      body: JSON.stringify({ setupCode: $('#ownerCode').value, initData: telegramInitData() })
     });
     saveAuth(payload.token, payload.me);
     await finishAuthorizedStartup();
