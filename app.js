@@ -112,6 +112,42 @@ function hideAuthGate() {
   $('#authGate').hidden = true;
 }
 
+
+function isPendingAccess() {
+  return authState.me?.role === 'PENDING';
+}
+
+function renderPendingAccess() {
+  configureMainControls({
+    showStore: false,
+    showBalanceFilters: false,
+    showDates: false
+  });
+
+  metrics([]);
+
+  const connection = currentConnection();
+
+  $('#content').innerHTML = `
+    <div class="pending-access-card">
+      <div class="pending-access-icon">✓</div>
+      <h2>Аккаунт iiko привязан</h2>
+      <p>
+        Telegram ID и логин iiko сохранены для
+        <strong>${escapeHtml(connection?.name || 'этого сервера')}</strong>.
+      </p>
+      <p>
+        Владелец должен один раз выбрать вашу роль.
+        После этого разделы появятся автоматически.
+      </p>
+      <div class="pending-access-meta">
+        <span>Роль</span>
+        <strong>Ожидает подтверждения</strong>
+      </div>
+    </div>
+  `;
+}
+
 function applyPermissions() {
   $$('.menu-item[data-permission]').forEach((button) => {
     const allowed = permissionGranted(button.dataset.permission);
@@ -160,6 +196,112 @@ function applyConnectionToApp() {
   applyPermissions();
 }
 
+
+async function loadOwnerRegistrations() {
+  if (!permissionGranted('admin.manage')) return;
+
+  const list = $('#registrationList');
+  if (!list) return;
+
+  list.innerHTML = '<div class="panel-loading">Загрузка…</div>';
+
+  try {
+    const response = await apiFetch(
+      `${cfg.workerUrl}/api/admin/registrations`,
+      { method: 'GET' }
+    );
+
+    const payload = await response.json();
+
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+
+    const rows = payload.registrations || [];
+
+    if (!rows.length) {
+      list.innerHTML = '<div class="panel-empty">Пользователей пока нет</div>';
+      return;
+    }
+
+    list.innerHTML = rows.map((row) => `
+      <div class="registration-item ${row.role === 'PENDING' ? 'pending' : ''}">
+        <div class="registration-item__main">
+          <strong>${escapeHtml(row.name || row.telegramId)}</strong>
+          <span>${escapeHtml(row.connectionName)}</span>
+          <small>
+            TG: ${escapeHtml(row.telegramId)}
+            ${row.iikoLogin ? ` · iiko: ${escapeHtml(row.iikoLogin)}` : ''}
+          </small>
+        </div>
+        <div class="registration-item__actions">
+          ${row.role === 'PENDING'
+            ? `
+              <select
+                class="registration-role-select"
+                data-registration-role
+                data-user-id="${escAttr(row.userId)}"
+                data-connection-id="${escAttr(row.connectionId)}"
+              >
+                <option value="CHEF">Шеф-повар</option>
+                <option value="BAR_MANAGER">Бар-менеджер</option>
+                <option value="MANAGER">Менеджер</option>
+                <option value="MANAGING">Управляющий</option>
+              </select>
+              <button
+                class="auth-secondary registration-approve"
+                type="button"
+                data-approve-registration
+                data-user-id="${escAttr(row.userId)}"
+                data-connection-id="${escAttr(row.connectionId)}"
+              >Подтвердить</button>
+            `
+            : `<span class="registration-role-badge">${escapeHtml(row.roleLabel)}</span>`
+          }
+        </div>
+      </div>
+    `).join('');
+
+    $$('[data-approve-registration]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const userId = button.dataset.userId;
+        const connectionId = button.dataset.connectionId;
+        const select = $(
+          `[data-registration-role][data-user-id="${CSS.escape(userId)}"][data-connection-id="${CSS.escape(connectionId)}"]`
+        );
+
+        try {
+          const response = await apiFetch(
+            `${cfg.workerUrl}/api/admin/registrations/role`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId,
+                connectionId,
+                role: select.value
+              })
+            }
+          );
+
+          const payload = await response.json();
+
+          if (!response.ok || payload.ok === false) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          toast('Роль назначена');
+          await loadOwnerRegistrations();
+        } catch (error) {
+          toast(error.message);
+        }
+      });
+    });
+  } catch (error) {
+    list.innerHTML = `<div class="panel-empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 function renderConnectionPanel() {
   const list = $('#connectionList');
   if (!list) return;
@@ -204,6 +346,10 @@ function renderConnectionPanel() {
     select.innerHTML = connections.map((connection) =>
       `<option value="${escAttr(connection.id)}">${escapeHtml(connection.name)}</option>`
     ).join('');
+  }
+
+  if (permissionGranted('admin.manage')) {
+    loadOwnerRegistrations();
   }
 }
 
@@ -272,7 +418,8 @@ async function iikoLogin() {
     body: JSON.stringify({
       connectionId: $('#loginConnection').value,
       login: $('#loginIikoLogin').value,
-      password: $('#loginIikoPassword').value
+      password: $('#loginIikoPassword').value,
+      initData: telegramInitData()
     })
   });
 
@@ -320,7 +467,7 @@ async function initializeAuth() {
 
   $('#authTitle').textContent = 'Вход';
   $('#authHint').textContent =
-    'Войдите аккаунтом iiko или через Telegram.';
+    'Войдите аккаунтом iiko. Если вы новый пользователь и открыли Mini App в Telegram, ваш Telegram ID привяжется автоматически. Либо войдите через Telegram, если привязка уже есть.';
 
   await loadPublicConnections();
 
@@ -346,6 +493,12 @@ async function finishAuthorizedStartup() {
   hideAuthGate();
   applyConnectionToApp();
   setDefaultDates();
+
+  if (isPendingAccess()) {
+    renderPendingAccess();
+    return;
+  }
+
   startFastLoad();
 }
 

@@ -1994,3 +1994,130 @@ html, body { background: #090a0c; }
 #loginChoiceBox > .auth-divider {
   margin: 3px 0;
 }
+
+
+/* v65 — self registration */
+.pending-access-card {
+  width: min(620px, 100%);
+  margin: 40px auto;
+  padding: 30px;
+  text-align: center;
+  border: 1px solid #262c35;
+  border-radius: 22px;
+  background: #111317;
+}
+
+.pending-access-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 15px;
+  color: #090a0c;
+  font-size: 24px;
+  font-weight: 900;
+  border-radius: 50%;
+  background: #f4f6f8;
+}
+
+.pending-access-card h2 {
+  margin: 0 0 10px;
+}
+
+.pending-access-card p {
+  margin: 8px auto;
+  max-width: 500px;
+  color: #98a2b1;
+  line-height: 1.5;
+}
+
+.pending-access-meta {
+  margin-top: 20px;
+  padding: 13px;
+  border: 1px solid #272d36;
+  border-radius: 14px;
+  background: #0b0d10;
+}
+
+.pending-access-meta span,
+.pending-access-meta strong {
+  display: block;
+}
+
+.pending-access-meta span {
+  margin-bottom: 4px;
+  color: #7f8999;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.registration-list {
+  display: grid;
+  gap: 9px;
+}
+
+.registration-item {
+  padding: 11px;
+  border: 1px solid #252b34;
+  border-radius: 13px;
+  background: #111317;
+}
+
+.registration-item.pending {
+  border-color: rgba(245, 158, 11, .3);
+  background: rgba(245, 158, 11, .035);
+}
+
+.registration-item__main strong,
+.registration-item__main span,
+.registration-item__main small {
+  display: block;
+}
+
+.registration-item__main span {
+  margin-top: 3px;
+  color: #a7b0bd;
+  font-size: 12px;
+}
+
+.registration-item__main small {
+  margin-top: 4px;
+  color: #747e8d;
+  font-size: 10px;
+}
+
+.registration-item__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.registration-role-select {
+  min-height: 39px;
+  padding: 0 9px;
+  color: #eef2f6;
+  background: #0b0d10;
+  border: 1px solid #29303a;
+  border-radius: 10px;
+}
+
+.registration-approve {
+  min-height: 39px;
+  padding: 0 12px;
+}
+
+.registration-role-badge {
+  grid-column: 1 / -1;
+  color: #9ca6b5;
+  font-size: 12px;
+}
+
+.panel-loading,
+.panel-empty {
+  padding: 12px;
+  color: #7f8999;
+  font-size: 12px;
+  text-align: center;
+}
