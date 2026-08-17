@@ -362,6 +362,8 @@ function resetConnectionData() {
   state.dishDetail = null;
   state.turnoverRows = [];
   state.documents = [];
+  state.dashboard = null;
+  state.dashboardDetail = '';
   state.page = 1;
 }
 
@@ -566,7 +568,12 @@ const state = {
   dishesSource: '',
   turnoverRows: [],
   turnoverLoading: false,
-  turnoverMode: 'both'
+  turnoverMode: 'both',
+  dashboard: null,
+  dashboardLoading: false,
+  dashboardPeriod: 'today',
+  dashboardScope: 'role',
+  dashboardDetail: ''
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -2037,6 +2044,543 @@ function renderNotConnected() {
   `;
 }
 
+
+function dashboardDateRange(period) {
+  const now = new Date();
+
+  if (period === '7d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 6);
+    return {
+      from: isoDateLocal(from),
+      to: isoDateLocal(now)
+    };
+  }
+
+  if (period === '30d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 29);
+    return {
+      from: isoDateLocal(from),
+      to: isoDateLocal(now)
+    };
+  }
+
+  return {
+    from: isoDateLocal(now),
+    to: isoDateLocal(now)
+  };
+}
+
+function signedMoney(value) {
+  const n = Number(value || 0);
+  if (Math.abs(n) < 0.005) return money.format(0);
+  return `${n > 0 ? '+' : '−'}${money.format(Math.abs(n))}`;
+}
+
+function dashboardQty(value, unit = '') {
+  const n = Number(value || 0);
+  return `${fmt.format(n)}${unit ? ` ${escapeHtml(unit)}` : ''}`;
+}
+
+async function apiDashboard({ forceRefresh = false } = {}) {
+  const range = dashboardDateRange(state.dashboardPeriod);
+  const params = new URLSearchParams({
+    from: range.from,
+    to: range.to,
+    scope: state.dashboardScope
+  });
+
+  if (state.dashboardScope === 'store' && state.storeId) {
+    params.set('storeId', state.storeId);
+  }
+
+  if (forceRefresh) {
+    params.set('_', String(Date.now()));
+  }
+
+  const response = await apiFetch(
+    `${cfg.workerUrl}/api/dashboard?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store'
+    }
+  );
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+
+  return payload;
+}
+
+async function loadDashboard({ forceRefresh = false } = {}) {
+  if (state.dashboardLoading) return;
+
+  state.dashboardLoading = true;
+  state.dashboardDetail = '';
+
+  configureMainControls({
+    showStore: false,
+    showBalanceFilters: false,
+    showDates: false
+  });
+
+  metrics([]);
+
+  $('#content').innerHTML = `
+    <div class="dashboard-loading">
+      <span class="dashboard-spinner"></span>
+      <strong>Собираем дашборд…</strong>
+      <small>ОСВ по доступным складам</small>
+    </div>
+  `;
+
+  try {
+    state.dashboard = await apiDashboard({ forceRefresh });
+    renderDashboard();
+  } catch (error) {
+    $('#content').innerHTML = `
+      <div class="empty-state">
+        <strong>Не удалось построить дашборд</strong>
+        ${escapeHtml(error.message)}
+      </div>
+    `;
+  } finally {
+    state.dashboardLoading = false;
+  }
+}
+
+function dashboardRoleName() {
+  return authState.me?.roleLabel || currentConnection()?.roleLabel || '';
+}
+
+function dashboardStoreOptions() {
+  const role = authState.me?.role || '';
+  const maySeeAll = ['OWNER', 'MANAGING', 'MANAGER'].includes(role);
+
+  return `
+    <button
+      type="button"
+      class="dashboard-scope-chip ${state.dashboardScope === 'role' ? 'active' : ''}"
+      data-dashboard-scope="role"
+    >${['CHEF', 'BAR_MANAGER'].includes(role) ? 'Мои склады' : 'По роли'}</button>
+
+    ${maySeeAll ? `
+      <button
+        type="button"
+        class="dashboard-scope-chip ${state.dashboardScope === 'all' ? 'active' : ''}"
+        data-dashboard-scope="all"
+      >Весь ресторан</button>
+    ` : ''}
+
+    <button
+      type="button"
+      class="dashboard-scope-chip ${state.dashboardScope === 'store' ? 'active' : ''}"
+      data-dashboard-scope="store"
+    >Один склад</button>
+  `;
+}
+
+function dashboardKpis(data) {
+  const s = data.summary || {};
+  const role = authState.me?.role || '';
+
+  if (role === 'CHEF' || role === 'BAR_MANAGER') {
+    return [
+      {
+        label: 'Запасы сейчас',
+        value: money.format(s.closeValue || 0),
+        sub: `${s.storesCount || 0} склад(а)`,
+        tone: ''
+      },
+      {
+        label: 'Списания',
+        value: money.format(s.writeoffCost || 0),
+        sub: 'по себестоимости',
+        tone: Number(s.writeoffCost || 0) > 0 ? 'warn' : ''
+      },
+      {
+        label: 'Отрицательные',
+        value: fmt.format(s.negativeCount || 0),
+        sub: 'позиций',
+        tone: Number(s.negativeCount || 0) > 0 ? 'danger' : 'good'
+      },
+      {
+        label: 'Закончились',
+        value: fmt.format(s.ranOutCount || 0),
+        sub: 'за период',
+        tone: Number(s.ranOutCount || 0) > 0 ? 'warn' : ''
+      }
+    ];
+  }
+
+  return [
+    {
+      label: 'Запасы сейчас',
+      value: money.format(s.closeValue || 0),
+      sub: `на начало ${money.format(s.openValue || 0)}`,
+      tone: ''
+    },
+    {
+      label: 'Изменение запасов',
+      value: signedMoney(s.deltaValue || 0),
+      sub: 'по себестоимости',
+      tone: Number(s.deltaValue || 0) < 0 ? 'warn' : 'good'
+    },
+    {
+      label: 'Приход',
+      value: money.format(Math.abs(Number(s.incomingValue || 0))),
+      sub: 'по себестоимости',
+      tone: ''
+    },
+    {
+      label: 'Расход по продажам',
+      value: money.format(Math.abs(Number(s.salesCost || 0))),
+      sub: 'это не выручка',
+      tone: ''
+    },
+    {
+      label: 'Списания',
+      value: money.format(s.writeoffCost || 0),
+      sub: 'по себестоимости',
+      tone: Number(s.writeoffCost || 0) > 0 ? 'warn' : ''
+    },
+    {
+      label: 'Отрицательные',
+      value: fmt.format(s.negativeCount || 0),
+      sub: 'позиций',
+      tone: Number(s.negativeCount || 0) > 0 ? 'danger' : 'good'
+    }
+  ];
+}
+
+function dashboardListCard(title, rows, valueRenderer, emptyText = 'Нет данных') {
+  return `
+    <section class="dashboard-card dashboard-list-card">
+      <div class="dashboard-card__head">
+        <h3>${escapeHtml(title)}</h3>
+      </div>
+
+      <div class="dashboard-ranked-list">
+        ${rows?.length
+          ? rows.map((row, index) => `
+            <div class="dashboard-ranked-item">
+              <span class="dashboard-rank">${index + 1}</span>
+              <div class="dashboard-ranked-name">
+                <strong>${escapeHtml(row.name || 'Товар')}</strong>
+                <small>
+                  ${escapeHtml(row.storeName || '')}
+                  ${row.productNum ? ` · ${escapeHtml(row.productNum)}` : ''}
+                </small>
+              </div>
+              <div class="dashboard-ranked-value">
+                ${valueRenderer(row)}
+              </div>
+            </div>
+          `).join('')
+          : `<div class="dashboard-empty">${escapeHtml(emptyText)}</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderDashboardDetail(type) {
+  const data = state.dashboard;
+  if (!data) return;
+
+  let title = '';
+  let rows = [];
+
+  if (type === 'negative') {
+    title = 'Отрицательные остатки';
+    rows = data.negatives || [];
+  } else if (type === 'ranout') {
+    title = 'Закончились за период';
+    rows = data.ranOut || [];
+  } else if (type === 'reconciliation') {
+    title = 'Контрольные расхождения ОСВ';
+    rows = data.reconciliation || [];
+  }
+
+  state.dashboardDetail = type;
+
+  $('#dashboardDetail').innerHTML = `
+    <div class="dashboard-detail-head">
+      <strong>${escapeHtml(title)}</strong>
+      <button type="button" class="dashboard-detail-close" data-close-dashboard-detail>×</button>
+    </div>
+
+    <div class="dashboard-detail-list">
+      ${rows.length ? rows.map((row) => `
+        <div class="dashboard-detail-row">
+          <div>
+            <strong>${escapeHtml(row.name || 'Товар')}</strong>
+            <small>${escapeHtml(row.storeName || '')}</small>
+          </div>
+          <div>
+            <strong>${dashboardQty(row.closeQty, row.unit)}</strong>
+            <small>${money.format(row.closeAmt || 0)}</small>
+          </div>
+        </div>
+      `).join('') : `
+        <div class="dashboard-empty">Нет позиций</div>
+      `}
+    </div>
+  `;
+
+  $('#dashboardDetail').hidden = false;
+
+  $('[data-close-dashboard-detail]')?.addEventListener('click', () => {
+    $('#dashboardDetail').hidden = true;
+    state.dashboardDetail = '';
+  });
+
+  $('#dashboardDetail').scrollIntoView({
+    behavior: 'smooth',
+    block: 'start'
+  });
+}
+
+function renderDashboard() {
+  const data = state.dashboard;
+
+  configureMainControls({
+    showStore: state.dashboardScope === 'store',
+    showBalanceFilters: false,
+    showDates: false
+  });
+
+  metrics([]);
+
+  if (!data) {
+    loadDashboard();
+    return;
+  }
+
+  const s = data.summary || {};
+  const kpis = dashboardKpis(data);
+  const role = authState.me?.role || '';
+
+  const problemCount =
+    Number(s.negativeCount || 0) +
+    Number(s.ranOutCount || 0) +
+    Number(s.reconciliationCount || 0);
+
+  $('#content').innerHTML = `
+    <div class="dashboard-shell">
+      <div class="dashboard-topbar">
+        <div>
+          <span class="dashboard-eyebrow">${escapeHtml(dashboardRoleName())}</span>
+          <h2>Дашборд</h2>
+          <p>
+            ${escapeHtml(data.connectionName || currentConnection()?.name || '')}
+            · ${escapeHtml(data.period?.from || '')}
+            ${data.period?.from !== data.period?.to
+              ? `— ${escapeHtml(data.period?.to || '')}`
+              : ''}
+          </p>
+        </div>
+
+        <div class="dashboard-periods">
+          <button class="${state.dashboardPeriod === 'today' ? 'active' : ''}" data-dashboard-period="today">Сегодня</button>
+          <button class="${state.dashboardPeriod === '7d' ? 'active' : ''}" data-dashboard-period="7d">7 дней</button>
+          <button class="${state.dashboardPeriod === '30d' ? 'active' : ''}" data-dashboard-period="30d">30 дней</button>
+        </div>
+      </div>
+
+      <div class="dashboard-scope-row">
+        ${dashboardStoreOptions()}
+      </div>
+
+      <div class="dashboard-kpi-grid">
+        ${kpis.map((kpi) => `
+          <article class="dashboard-kpi ${kpi.tone ? `is-${kpi.tone}` : ''}">
+            <span>${escapeHtml(kpi.label)}</span>
+            <strong>${kpi.value}</strong>
+            <small>${escapeHtml(kpi.sub)}</small>
+          </article>
+        `).join('')}
+      </div>
+
+      <section class="dashboard-attention ${problemCount ? 'has-problems' : ''}">
+        <div class="dashboard-card__head">
+          <div>
+            <span class="dashboard-eyebrow">Контроль</span>
+            <h3>Требует внимания</h3>
+          </div>
+          <strong class="dashboard-attention-total">${fmt.format(problemCount)}</strong>
+        </div>
+
+        <div class="dashboard-attention-grid">
+          <button type="button" data-dashboard-detail="negative">
+            <span>Отрицательные</span>
+            <strong>${fmt.format(s.negativeCount || 0)}</strong>
+          </button>
+          <button type="button" data-dashboard-detail="ranout">
+            <span>Закончились</span>
+            <strong>${fmt.format(s.ranOutCount || 0)}</strong>
+          </button>
+          <button type="button" data-dashboard-detail="reconciliation">
+            <span>Расхождения ОСВ</span>
+            <strong>${fmt.format(s.reconciliationCount || 0)}</strong>
+          </button>
+        </div>
+      </section>
+
+      <div id="dashboardDetail" class="dashboard-detail" hidden></div>
+
+      <section class="dashboard-card">
+        <div class="dashboard-card__head">
+          <div>
+            <span class="dashboard-eyebrow">Склады</span>
+            <h3>Стоимость запасов</h3>
+          </div>
+          <strong>${money.format(s.closeValue || 0)}</strong>
+        </div>
+
+        <div class="dashboard-store-list">
+          ${(data.stores || []).map((store) => {
+            const max = Math.max(
+              1,
+              ...(data.stores || []).map((x) => Math.abs(Number(x.closeValue || 0)))
+            );
+            const width = Math.max(
+              2,
+              Math.min(100, Math.abs(Number(store.closeValue || 0)) / max * 100)
+            );
+
+            return `
+              <div class="dashboard-store-row">
+                <div class="dashboard-store-row__head">
+                  <strong>${escapeHtml(store.name)}</strong>
+                  <span>${money.format(store.closeValue || 0)}</span>
+                </div>
+                <div class="dashboard-store-track">
+                  <i style="width:${width}%"></i>
+                </div>
+                <div class="dashboard-store-meta">
+                  <span>${signedMoney(store.deltaValue || 0)}</span>
+                  <span>${fmt.format(store.negativeCount || 0)} отриц.</span>
+                  <span>${fmt.format(store.ranOutCount || 0)} законч.</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </section>
+
+      <div class="dashboard-two-column">
+        ${dashboardListCard(
+          role === 'CHEF' || role === 'BAR_MANAGER'
+            ? 'Больше всего уменьшились запасы'
+            : 'Наибольшее снижение запасов',
+          data.topDecrease || [],
+          (row) => `
+            <strong>${money.format(row.rankValue || 0)}</strong>
+            <small>${dashboardQty(row.openQty - row.closeQty, row.unit)}</small>
+          `,
+          'Снижения запасов нет'
+        )}
+
+        ${dashboardListCard(
+          'Больше всего списали',
+          data.topWriteoff || [],
+          (row) => `
+            <strong>${money.format(row.rankValue || 0)}</strong>
+            <small>${dashboardQty(Math.abs(row.writeoffQty || 0), row.unit)}</small>
+          `,
+          'Списаний нет'
+        )}
+      </div>
+
+      ${role === 'MANAGING' || role === 'MANAGER' || role === 'OWNER'
+        ? `
+          <div class="dashboard-two-column">
+            ${dashboardListCard(
+              'Наибольший складской расход по продажам',
+              data.topSalesUsage || [],
+              (row) => `
+                <strong>${money.format(row.rankValue || 0)}</strong>
+                <small>${dashboardQty(Math.abs(row.salesQty || 0), row.unit)}</small>
+              `,
+              'Нет расхода по продажам'
+            )}
+
+            ${dashboardListCard(
+              'Самые дорогие остатки',
+              data.topStock || [],
+              (row) => `
+                <strong>${money.format(row.rankValue || 0)}</strong>
+                <small>${dashboardQty(row.closeQty || 0, row.unit)}</small>
+              `,
+              'Нет остатков'
+            )}
+          </div>
+
+          <section class="dashboard-card dashboard-movement-card">
+            <div class="dashboard-card__head">
+              <div>
+                <span class="dashboard-eyebrow">ОСВ</span>
+                <h3>Движение по себестоимости</h3>
+              </div>
+            </div>
+
+            <div class="dashboard-movement-grid">
+              <div><span>Приход</span><strong>${money.format(Math.abs(Number(s.incomingValue || 0)))}</strong></div>
+              <div><span>Расход по продажам</span><strong>${money.format(Math.abs(Number(s.salesCost || 0)))}</strong></div>
+              <div><span>Списания</span><strong>${money.format(Math.abs(Number(s.writeoffCost || 0)))}</strong></div>
+              <div><span>Инвентаризация</span><strong>${signedMoney(s.inventoryEffect || 0)}</strong></div>
+              <div><span>Производство</span><strong>${signedMoney(s.productionEffect || 0)}</strong></div>
+              <div><span>Перемещения</span><strong>${signedMoney(s.transferEffect || 0)}</strong></div>
+            </div>
+          </section>
+        `
+        : ''
+      }
+
+      ${(data.failedStores || []).length
+        ? `
+          <div class="dashboard-warning">
+            Не удалось получить данные по ${data.failedStores.length} складам.
+          </div>
+        `
+        : ''
+      }
+
+      <div class="dashboard-source">
+        iikoOffice ОСВ · ${fmt.format(s.productRows || 0)} строк ·
+        ${data.cache?.cached ? 'кэш' : `${fmt.format(data.performance?.totalMs || 0)} мс`}
+      </div>
+    </div>
+  `;
+
+  $$('[data-dashboard-period]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.dashboardPeriod = button.dataset.dashboardPeriod;
+      state.dashboard = null;
+      loadDashboard();
+    });
+  });
+
+  $$('[data-dashboard-scope]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.dashboardScope = button.dataset.dashboardScope;
+      state.dashboard = null;
+      loadDashboard();
+    });
+  });
+
+  $$('[data-dashboard-detail]').forEach((button) => {
+    button.addEventListener('click', () => {
+      renderDashboardDetail(button.dataset.dashboardDetail);
+    });
+  });
+}
+
 function render() {
   if (!state.data) return;
 
@@ -2066,7 +2610,13 @@ function render() {
     } else if (!state.turnoverLoading) {
       loadTurnover();
     }
-  } else if (['autoorder', 'supplierPrices', 'dashboard', 'olap'].includes(state.tab)) {
+  } else if (state.tab === 'dashboard') {
+    if (state.dashboard) {
+      renderDashboard();
+    } else if (!state.dashboardLoading) {
+      loadDashboard();
+    }
+  } else if (['autoorder', 'supplierPrices', 'olap'].includes(state.tab)) {
     configureMainControls({
       showStore: false,
       showBalanceFilters: false,
@@ -2075,7 +2625,6 @@ function render() {
     const names = {
       autoorder: 'Автозаказ / Автозаявки',
       supplierPrices: 'Прайс-листы поставщиков',
-      dashboard: 'Дашборд',
       olap: 'OLAP отчёты'
     };
     metrics([]);
@@ -2130,6 +2679,9 @@ $('#refreshBtn').addEventListener('click', () => {
   } else if (state.tab === 'turnover') {
     state.turnoverRows = [];
     loadTurnover({ forceRefresh: true });
+  } else if (state.tab === 'dashboard') {
+    state.dashboard = null;
+    loadDashboard({ forceRefresh: true });
   } else {
     loadBalances({ forceRefresh: true, keepVisible: true });
   }
@@ -2164,6 +2716,9 @@ $('#storeFilter').addEventListener('change', (event) => {
   } else if (state.tab === 'turnover') {
     state.turnoverRows = [];
     loadTurnover();
+  } else if (state.tab === 'dashboard' && state.dashboardScope === 'store') {
+    state.dashboard = null;
+    loadDashboard();
   } else {
     render();
   }
