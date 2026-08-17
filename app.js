@@ -1,6 +1,305 @@
+
+const AUTH_TOKEN_KEY = 'iiko-office-auth-v59';
+const CONNECTION_KEY = 'iiko-office-connection-v59';
+
+const authState = {
+  token: localStorage.getItem(AUTH_TOKEN_KEY) || '',
+  me: null,
+  connectionId: localStorage.getItem(CONNECTION_KEY) || ''
+};
+
+function telegramInitData() {
+  return window.Telegram?.WebApp?.initData || '';
+}
+
+function permissionGranted(permission) {
+  const permissions = authState.me?.permissions || [];
+  return permissions.includes('*') || permissions.includes(permission);
+}
+
+async function publicApi(path, options = {}) {
+  const response = await fetch(`${cfg.workerUrl}${path}`, {
+    cache: 'no-store',
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
+
+  const payload = await response.json().catch(() => ({
+    ok: false,
+    error: `HTTP ${response.status}`
+  }));
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+
+  return payload;
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set('Accept', headers.get('Accept') || 'application/json');
+
+  if (authState.token) {
+    headers.set('Authorization', `Bearer ${authState.token}`);
+  }
+
+  if (authState.connectionId) {
+    headers.set('X-Connection-ID', authState.connectionId);
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    headers
+  });
+
+  if (response.status === 401) {
+    showAuthGate('Сессия закончилась. Войдите снова.');
+  }
+
+  return response;
+}
+
+function saveAuth(token, me) {
+  authState.token = token || authState.token;
+  authState.me = me || authState.me;
+
+  if (authState.token) {
+    localStorage.setItem(AUTH_TOKEN_KEY, authState.token);
+  }
+
+  const available = authState.me?.connections || [];
+  if (!available.some((x) => String(x.id) === String(authState.connectionId))) {
+    authState.connectionId = authState.me?.activeConnection?.id || available[0]?.id || '';
+  }
+
+  if (authState.connectionId) {
+    localStorage.setItem(CONNECTION_KEY, authState.connectionId);
+  }
+}
+
+function clearAuth() {
+  authState.token = '';
+  authState.me = null;
+  authState.connectionId = '';
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(CONNECTION_KEY);
+}
+
+function setAuthError(message = '') {
+  const box = $('#authError');
+  if (!box) return;
+  box.textContent = message;
+  box.hidden = !message;
+}
+
+function showAuthGate(message = '') {
+  document.body.classList.add('auth-pending');
+  document.body.classList.remove('authenticated');
+  $('#authGate').hidden = false;
+  if (message) {
+    $('#authHint').textContent = message;
+  }
+}
+
+function hideAuthGate() {
+  document.body.classList.remove('auth-pending');
+  document.body.classList.add('authenticated');
+  $('#authGate').hidden = true;
+}
+
+function applyPermissions() {
+  $$('.menu-item[data-permission]').forEach((button) => {
+    const allowed = permissionGranted(button.dataset.permission);
+    button.hidden = !allowed;
+  });
+
+  if (!permissionGranted('stock.view') && state.tab === 'balances') {
+    const first = $$('.menu-item[data-permission]').find((x) => !x.hidden);
+    if (first) state.tab = first.dataset.tab;
+  }
+
+  $('#adminPanel').hidden = !permissionGranted('admin.manage');
+}
+
+function currentConnection() {
+  return (authState.me?.connections || []).find(
+    (x) => String(x.id) === String(authState.connectionId)
+  ) || authState.me?.activeConnection || null;
+}
+
+function applyConnectionToApp() {
+  const connection = currentConnection();
+  if (!connection) return;
+
+  LIVE_STORES = Array.isArray(connection.stores) ? connection.stores : [];
+  state.data.stores = LIVE_STORES;
+
+  const previous = String(state.storeId || '');
+  if (!LIVE_STORES.some((x) => String(x.id) === previous)) {
+    state.storeId = LIVE_STORES[0]?.id || '';
+  }
+
+  $('#connectionName').textContent = connection.name;
+  $('#connectionRole').textContent = connection.roleLabel || connection.role || '';
+  $('#connectionStatus').textContent = `${connection.name} · ${connection.roleLabel || ''}`;
+  $('#accountName').textContent = authState.me?.user?.name || 'Пользователь';
+
+  populateStoreFilter();
+  renderConnectionPanel();
+  applyPermissions();
+}
+
+function renderConnectionPanel() {
+  const list = $('#connectionList');
+  if (!list) return;
+
+  const connections = authState.me?.connections || [];
+  list.innerHTML = connections.map((connection) => `
+    <button
+      type="button"
+      class="connection-item ${String(connection.id) === String(authState.connectionId) ? 'active' : ''}"
+      data-connection-id="${escAttr(connection.id)}"
+    >
+      <span>
+        <strong>${escapeHtml(connection.name)}</strong>
+        <small>${escapeHtml(connection.roleLabel || connection.role || '')}</small>
+      </span>
+      <b>${String(connection.id) === String(authState.connectionId) ? '✓' : ''}</b>
+    </button>
+  `).join('');
+
+  $$('[data-connection-id]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      authState.connectionId = button.dataset.connectionId;
+      localStorage.setItem(CONNECTION_KEY, authState.connectionId);
+
+      const mePayload = await publicApi('/api/auth/me', {
+        headers: {
+          Authorization: `Bearer ${authState.token}`,
+          'X-Connection-ID': authState.connectionId
+        }
+      });
+
+      saveAuth('', mePayload.me);
+      resetConnectionData();
+      applyConnectionToApp();
+      closeConnectionPanel();
+      startFastLoad();
+    });
+  });
+
+  const select = $('#newUserConnection');
+  if (select) {
+    select.innerHTML = connections.map((connection) =>
+      `<option value="${escAttr(connection.id)}">${escapeHtml(connection.name)}</option>`
+    ).join('');
+  }
+}
+
+function resetConnectionData() {
+  state.liveStockItems = [];
+  state.liveStockTotal = 0;
+  state.liveStockLoaded = false;
+  state.dishes = [];
+  state.dishDetail = null;
+  state.turnoverRows = [];
+  state.documents = [];
+  state.page = 1;
+}
+
+function openConnectionPanel() {
+  $('#connectionPanel').classList.add('open');
+  $('#connectionPanel').setAttribute('aria-hidden', 'false');
+  $('#connectionPanelBackdrop').hidden = false;
+}
+
+function closeConnectionPanel() {
+  $('#connectionPanel').classList.remove('open');
+  $('#connectionPanel').setAttribute('aria-hidden', 'true');
+  $('#connectionPanelBackdrop').hidden = true;
+}
+
+async function loginWithExistingSession() {
+  if (!authState.token) return false;
+
+  try {
+    const payload = await publicApi('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${authState.token}`,
+        ...(authState.connectionId ? { 'X-Connection-ID': authState.connectionId } : {})
+      }
+    });
+    saveAuth('', payload.me);
+    return true;
+  } catch {
+    clearAuth();
+    return false;
+  }
+}
+
+async function telegramLogin() {
+  const initData = telegramInitData();
+  if (!initData) {
+    throw new Error('Откройте приложение из Telegram-бота.');
+  }
+
+  const payload = await publicApi('/api/auth/telegram', {
+    method: 'POST',
+    body: JSON.stringify({ initData })
+  });
+
+  saveAuth(payload.token, payload.me);
+}
+
+async function initializeAuth() {
+  showAuthGate();
+
+  if (await loginWithExistingSession()) {
+    return true;
+  }
+
+  const status = await publicApi('/api/auth/status');
+
+  if (!status.configured) {
+    $('#authTitle').textContent = 'Первое подключение';
+    $('#authHint').textContent = 'Подключите первый iikoServer. Это делается один раз.';
+    $('#firstSetupForm').hidden = false;
+    $('#telegramLoginBox').hidden = true;
+    return false;
+  }
+
+  if (telegramInitData()) {
+    try {
+      await telegramLogin();
+      return true;
+    } catch (error) {
+      $('#authHint').textContent = error.message;
+    }
+  } else {
+    $('#authHint').textContent = 'Откройте Mini App в Telegram или войдите владельцем для работы с ПК.';
+  }
+
+  $('#firstSetupForm').hidden = true;
+  $('#telegramLoginBox').hidden = false;
+  return false;
+}
+
+async function finishAuthorizedStartup() {
+  hideAuthGate();
+  applyConnectionToApp();
+  setDefaultDates();
+  startFastLoad();
+}
+
+
 const cfg = window.APP_CONFIG || {};
 
-const LIVE_STORES = [
+let LIVE_STORES = [
   { id: '4ba256dc-ac44-4df2-9e92-3746549c5b4b', name: 'Бар Сургут' },
   { id: '73a57aee-1b68-4a18-bc7c-a308d61c92c2', name: 'Кухня Сургут' },
   { id: 'c8d5ad09-4cf9-4f8c-9273-fd4b25b40446', name: 'Хоз.склад Сургут' },
@@ -168,7 +467,7 @@ async function apiLiveStock({ forceRefresh = false } = {}) {
     params.set('_', String(Date.now()));
   }
 
-  const response = await fetch(
+  const response = await apiFetch(
     `${cfg.workerUrl}/api/stock-live?${params.toString()}`,
     {
       method: 'GET',
@@ -752,7 +1051,7 @@ async function apiDishes({ forceRefresh = false } = {}) {
   const params = new URLSearchParams();
   if (forceRefresh) params.set('refresh', '1');
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  const response = await fetch(`${cfg.workerUrl}/api/nomenclature${suffix}`, {
+  const response = await apiFetch(`${cfg.workerUrl}/api/nomenclature${suffix}`, {
     cache: 'no-store',
     headers: { Accept: 'application/json' }
   });
@@ -767,7 +1066,7 @@ async function apiDishes({ forceRefresh = false } = {}) {
 }
 
 async function apiDishDetail(productId) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${cfg.workerUrl}/api/nomenclature/${encodeURIComponent(productId)}`,
     { cache: 'no-store', headers: { Accept: 'application/json' } }
   );
@@ -1125,7 +1424,7 @@ async function apiTurnover({ forceRefresh = false } = {}) {
     params.set('_', String(Date.now()));
   }
 
-  const response = await fetch(
+  const response = await apiFetch(
     `${cfg.workerUrl}/api/turnover?${params.toString()}`,
     {
       method: 'GET',
@@ -1469,6 +1768,25 @@ function render() {
     } else if (!state.turnoverLoading) {
       loadTurnover();
     }
+  } else if (['autoorder', 'supplierPrices', 'dashboard', 'olap'].includes(state.tab)) {
+    configureMainControls({
+      showStore: false,
+      showBalanceFilters: false,
+      showDates: false
+    });
+    const names = {
+      autoorder: 'Автозаказ / Автозаявки',
+      supplierPrices: 'Прайс-листы поставщиков',
+      dashboard: 'Дашборд',
+      olap: 'OLAP отчёты'
+    };
+    metrics([]);
+    $('#content').innerHTML = `
+      <div class="empty-state">
+        <strong>${escapeHtml(names[state.tab] || 'Раздел')}</strong>
+        Доступ уже учитывается по роли. Сам раздел подключим следующим этапом.
+      </div>
+    `;
   } else {
     renderNotConnected();
   }
@@ -1484,7 +1802,11 @@ function setTab(tab) {
     balances: 'Товар, код, категория',
     documents: 'Номер, тип, склад, комментарий',
     dishes: 'Блюдо, товар, полуфабрикат, код',
-    turnover: 'Товар, код, категория'
+    turnover: 'Товар, код, категория',
+    autoorder: 'Автозаказ',
+    supplierPrices: 'Поставщик, товар',
+    dashboard: 'Показатель',
+    olap: 'Отчёт'
   };
   $('#searchInput').placeholder = placeholders[tab] || 'Поиск';
 
@@ -1601,5 +1923,145 @@ if (tg) {
   }
 }
 
-setDefaultDates();
-startFastLoad();
+
+$('#connectionBtn').addEventListener('click', openConnectionPanel);
+$('#closeConnectionPanel').addEventListener('click', closeConnectionPanel);
+$('#connectionPanelBackdrop').addEventListener('click', closeConnectionPanel);
+
+$('#telegramLoginBtn').addEventListener('click', async () => {
+  setAuthError('');
+  try {
+    await telegramLogin();
+    await finishAuthorizedStartup();
+  } catch (error) {
+    setAuthError(error.message);
+  }
+});
+
+$('#ownerLoginBtn').addEventListener('click', async () => {
+  setAuthError('');
+  try {
+    const payload = await publicApi('/api/auth/web-owner', {
+      method: 'POST',
+      body: JSON.stringify({ setupCode: $('#ownerCode').value })
+    });
+    saveAuth(payload.token, payload.me);
+    await finishAuthorizedStartup();
+  } catch (error) {
+    setAuthError(error.message);
+  }
+});
+
+$('#firstSetupForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setAuthError('');
+
+  try {
+    const payload = await publicApi('/api/auth/bootstrap', {
+      method: 'POST',
+      body: JSON.stringify({
+        serverName: $('#setupServerName').value,
+        serverUrl: $('#setupServerUrl').value,
+        login: $('#setupLogin').value,
+        password: $('#setupPassword').value,
+        timezoneOffsetMinutes: Number($('#setupTimezone').value),
+        setupCode: $('#setupCode').value,
+        initData: telegramInitData()
+      })
+    });
+
+    saveAuth(payload.token, payload.me);
+    $('#setupPassword').value = '';
+    $('#setupCode').value = '';
+    await finishAuthorizedStartup();
+  } catch (error) {
+    setAuthError(error.message);
+  }
+});
+
+$('#addConnectionForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  try {
+    const response = await apiFetch(`${cfg.workerUrl}/api/admin/connections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serverName: $('#addServerName').value,
+        serverUrl: $('#addServerUrl').value,
+        login: $('#addServerLogin').value,
+        password: $('#addServerPassword').value,
+        timezoneOffsetMinutes: Number($('#addServerTimezone').value)
+      })
+    });
+
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+
+    $('#addServerPassword').value = '';
+    const mePayload = await publicApi('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${authState.token}`,
+        'X-Connection-ID': authState.connectionId
+      }
+    });
+    saveAuth('', mePayload.me);
+    applyConnectionToApp();
+    toast('Сервер добавлен');
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+$('#addUserForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  try {
+    const response = await apiFetch(`${cfg.workerUrl}/api/admin/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegramId: $('#newUserTelegramId').value,
+        displayName: $('#newUserName').value,
+        connectionId: $('#newUserConnection').value,
+        role: $('#newUserRole').value
+      })
+    });
+
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+
+    $('#newUserTelegramId').value = '';
+    $('#newUserName').value = '';
+    toast('Доступ сохранён');
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+$('#logoutBtn').addEventListener('click', async () => {
+  try {
+    if (authState.token) {
+      await apiFetch(`${cfg.workerUrl}/api/auth/logout`, { method: 'POST' });
+    }
+  } catch {}
+
+  clearAuth();
+  location.reload();
+});
+
+(async () => {
+  try {
+    const ready = await initializeAuth();
+    if (ready) {
+      await finishAuthorizedStartup();
+    }
+  } catch (error) {
+    showAuthGate(error.message);
+    setAuthError(error.message);
+  }
+})();

@@ -5,13 +5,129 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090a0c">
   <title>iiko Office</title>
-  <link rel="icon" type="image/svg+xml" href="./assets/app-icon.svg?v=56">
-  <link rel="apple-touch-icon" href="./assets/app-icon.svg?v=56">
+  <link rel="icon" type="image/svg+xml" href="./assets/app-icon.svg?v=59">
+  <link rel="apple-touch-icon" href="./assets/app-icon.svg?v=59">
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="./styles.css?v=58">
+  <link rel="stylesheet" href="./styles.css?v=59">
 </head>
-<body>
+<body class="auth-pending">
+
+  <section id="authGate" class="auth-gate">
+    <div class="auth-card">
+      <div class="auth-logo"><img src="./assets/logo.svg?v=59" alt=""></div>
+      <div class="auth-heading">
+        <span>iiko Office</span>
+        <h2 id="authTitle">Подключение</h2>
+        <p id="authHint">Проверяем авторизацию…</p>
+      </div>
+
+      <form id="firstSetupForm" class="auth-form" hidden>
+        <label>
+          <span>Название ресторана / подключения</span>
+          <input id="setupServerName" autocomplete="organization" placeholder="ТС — Сургут" required>
+        </label>
+        <label>
+          <span>Адрес iikoServer</span>
+          <input id="setupServerUrl" autocomplete="url" placeholder="https://example.iiko.it" required>
+        </label>
+        <div class="auth-two">
+          <label>
+            <span>Логин iiko</span>
+            <input id="setupLogin" autocomplete="username" required>
+          </label>
+          <label>
+            <span>Пароль iiko</span>
+            <input id="setupPassword" type="password" autocomplete="current-password" required>
+          </label>
+        </div>
+        <label>
+          <span>Часовой пояс</span>
+          <select id="setupTimezone">
+            <option value="300">UTC+5 — Сургут</option>
+            <option value="420">UTC+7 — Новосибирск</option>
+            <option value="180">UTC+3 — Москва</option>
+            <option value="240">UTC+4</option>
+            <option value="360">UTC+6</option>
+            <option value="480">UTC+8</option>
+          </select>
+        </label>
+        <label>
+          <span>Код владельца</span>
+          <input id="setupCode" type="password" autocomplete="one-time-code" required>
+        </label>
+        <button class="auth-primary" type="submit">Подключить iikoServer</button>
+        <p class="auth-small">Логин и пароль передаются только Worker по HTTPS и сохраняются в D1 в зашифрованном виде.</p>
+      </form>
+
+      <div id="telegramLoginBox" class="auth-form" hidden>
+        <button id="telegramLoginBtn" class="auth-primary" type="button">Войти через Telegram</button>
+        <div class="auth-divider"><span>или с компьютера</span></div>
+        <label>
+          <span>Код владельца</span>
+          <input id="ownerCode" type="password" autocomplete="one-time-code">
+        </label>
+        <button id="ownerLoginBtn" class="auth-secondary" type="button">Войти владельцем</button>
+        <p class="auth-small">Для сотрудников вход выполняется автоматически по Telegram. Код владельца нужен только для администрирования с ПК.</p>
+      </div>
+
+      <div id="authError" class="auth-error" hidden></div>
+    </div>
+  </section>
+
+  <div id="connectionPanelBackdrop" class="connection-backdrop" hidden></div>
+  <aside id="connectionPanel" class="connection-panel" aria-hidden="true">
+    <div class="connection-panel__head">
+      <div>
+        <span>Аккаунт</span>
+        <strong id="accountName">—</strong>
+      </div>
+      <button id="closeConnectionPanel" class="icon-button" type="button">×</button>
+    </div>
+
+    <div class="connection-panel__section">
+      <span class="connection-panel__label">Ресторан / сервер</span>
+      <div id="connectionList" class="connection-list"></div>
+    </div>
+
+    <div id="adminPanel" hidden>
+      <div class="connection-panel__section">
+        <span class="connection-panel__label">Добавить сервер</span>
+        <form id="addConnectionForm" class="compact-form">
+          <input id="addServerName" placeholder="Название" required>
+          <input id="addServerUrl" placeholder="https://server.iiko.it" required>
+          <input id="addServerLogin" placeholder="Логин iiko" required>
+          <input id="addServerPassword" type="password" placeholder="Пароль iiko" required>
+          <select id="addServerTimezone">
+            <option value="300">UTC+5 — Сургут</option>
+            <option value="420">UTC+7 — Новосибирск</option>
+            <option value="180">UTC+3 — Москва</option>
+          </select>
+          <button class="auth-secondary" type="submit">Добавить подключение</button>
+        </form>
+      </div>
+
+      <div class="connection-panel__section">
+        <span class="connection-panel__label">Выдать доступ</span>
+        <form id="addUserForm" class="compact-form">
+          <input id="newUserTelegramId" inputmode="numeric" placeholder="Telegram ID" required>
+          <input id="newUserName" placeholder="Имя сотрудника" required>
+          <select id="newUserConnection" required></select>
+          <select id="newUserRole" required>
+            <option value="CHEF">Шеф-повар</option>
+            <option value="BAR_MANAGER">Бар-менеджер</option>
+            <option value="MANAGER">Менеджер</option>
+            <option value="MANAGING">Управляющий</option>
+            <option value="OWNER">Владелец</option>
+          </select>
+          <button class="auth-secondary" type="submit">Сохранить доступ</button>
+        </form>
+      </div>
+    </div>
+
+    <button id="logoutBtn" class="logout-button" type="button">Выйти</button>
+  </aside>
+
   <div id="menuBackdrop" class="menu-backdrop" hidden></div>
 
   <aside id="sideMenu" class="side-menu" aria-hidden="true">
@@ -24,25 +140,41 @@
     </div>
 
     <nav class="side-menu__nav" aria-label="Разделы приложения">
-      <button class="menu-item active" type="button" data-tab="balances">
+      <button class="menu-item active" type="button" data-tab="balances" data-permission="stock.view">
         <span class="menu-item__icon">▦</span>
         <span>Остатки</span>
       </button>
-      <button class="menu-item" type="button" data-tab="documents">
+      <button class="menu-item" type="button" data-tab="documents" data-permission="documents.view">
         <span class="menu-item__icon">▤</span>
         <span>Документы</span>
       </button>
-      <button class="menu-item" type="button" data-tab="inventories">
+      <button class="menu-item" type="button" data-tab="inventories" data-permission="inventory.view">
         <span class="menu-item__icon">✓</span>
         <span>Инвентаризации</span>
       </button>
-      <button class="menu-item" type="button" data-tab="dishes">
+      <button class="menu-item" type="button" data-tab="dishes" data-permission="nomenclature.view">
         <span class="menu-item__icon">◫</span>
         <span>Номенклатура</span>
       </button>
-      <button class="menu-item" type="button" data-tab="turnover">
+      <button class="menu-item" type="button" data-tab="turnover" data-permission="turnover.view">
         <span class="menu-item__icon">▥</span>
         <span>ОСВ</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="autoorder" data-permission="autoorder.view">
+        <span class="menu-item__icon">↻</span>
+        <span>Автозаказ</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="supplierPrices" data-permission="supplier_prices.view">
+        <span class="menu-item__icon">₽</span>
+        <span>Прайсы поставщиков</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="dashboard" data-permission="dashboard.view">
+        <span class="menu-item__icon">◩</span>
+        <span>Дашборд</span>
+      </button>
+      <button class="menu-item" type="button" data-tab="olap" data-permission="olap.view">
+        <span class="menu-item__icon">⌁</span>
+        <span>OLAP отчёты</span>
       </button>
     </nav>
   </aside>
@@ -53,12 +185,17 @@
     </button>
 
     <div class="brand">
-      <div class="brand__mark"><img src="./assets/logo.svg?v=58" alt=""></div>
+      <div class="brand__mark"><img src="./assets/logo.svg?v=59" alt=""></div>
       <div class="brand__text">
         <h1 id="pageTitle">iiko Office</h1>
         <p id="connectionStatus">Подключение…</p>
       </div>
     </div>
+
+    <button id="connectionBtn" class="connection-button" type="button">
+      <span id="connectionName">Сервер</span>
+      <small id="connectionRole">—</small>
+    </button>
 
     <button id="refreshBtn" class="refresh-button" type="button">
       <span class="refresh-button__icon">↻</span>
@@ -109,7 +246,7 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="./config.js?v=58"></script>
-  <script type="module" src="./app.js?v=58"></script>
+  <script src="./config.js?v=59"></script>
+  <script type="module" src="./app.js?v=59"></script>
 </body>
 </html>
