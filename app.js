@@ -1,6 +1,7 @@
 
 const AUTH_TOKEN_KEY = 'iiko-office-auth-v59';
 const CONNECTION_KEY = 'iiko-office-connection-v59';
+const MANUAL_LOGIN_KEY = 'iiko-office-manual-login-v66';
 
 const authState = {
   token: localStorage.getItem(AUTH_TOKEN_KEY) || '',
@@ -368,12 +369,16 @@ function openConnectionPanel() {
   $('#connectionPanel').classList.add('open');
   $('#connectionPanel').setAttribute('aria-hidden', 'false');
   $('#connectionPanelBackdrop').hidden = false;
+  document.body.classList.add('drawer-open');
 }
 
 function closeConnectionPanel() {
   $('#connectionPanel').classList.remove('open');
   $('#connectionPanel').setAttribute('aria-hidden', 'true');
   $('#connectionPanelBackdrop').hidden = true;
+  if (!$('#sideMenu').classList.contains('open')) {
+    document.body.classList.remove('drawer-open');
+  }
 }
 
 async function loginWithExistingSession() {
@@ -424,10 +429,12 @@ async function iikoLogin() {
   });
 
   $('#loginIikoPassword').value = '';
+  localStorage.removeItem(MANUAL_LOGIN_KEY);
   saveAuth(payload.token, payload.me);
 }
 
 async function telegramLogin() {
+  localStorage.removeItem(MANUAL_LOGIN_KEY);
   const initData = telegramInitData();
   if (!initData) {
     throw new Error('Откройте приложение из Telegram-бота.');
@@ -471,19 +478,26 @@ async function initializeAuth() {
 
   await loadPublicConnections();
 
-  // Inside Telegram try the mapped Telegram account automatically.
-  if (telegramInitData()) {
+  // Inside Telegram auto-login only until the user explicitly presses Logout.
+  // After logout we keep the login screen open so the owner can test another
+  // iiko account (chef/accountant/etc.) inside the same Telegram Mini App.
+  const manualLoginRequested =
+    localStorage.getItem(MANUAL_LOGIN_KEY) === '1';
+
+  if (telegramInitData() && !manualLoginRequested) {
     try {
       await telegramLogin();
       return true;
     } catch (error) {
       $('#authHint').textContent =
         `${error.message} Можно войти аккаунтом iiko ниже.`;
-      // One-time owner claim stays hidden from normal users.
       if (/доступ|выдан/i.test(error.message)) {
         $('#ownerClaimBox').hidden = false;
       }
     }
+  } else if (telegramInitData() && manualLoginRequested) {
+    $('#authHint').textContent =
+      'Вы вышли из Telegram-входа. Теперь можно войти другим аккаунтом iiko или снова нажать «Войти через Telegram».';
   }
 
   return false;
@@ -633,6 +647,7 @@ function openMenu() {
   $('#sideMenu').setAttribute('aria-hidden', 'false');
   $('#menuBackdrop').hidden = false;
   $('#menuBtn').setAttribute('aria-expanded', 'true');
+  document.body.classList.add('drawer-open');
 }
 
 function closeMenu() {
@@ -640,6 +655,9 @@ function closeMenu() {
   $('#sideMenu').setAttribute('aria-hidden', 'true');
   $('#menuBackdrop').hidden = true;
   $('#menuBtn').setAttribute('aria-expanded', 'false');
+  if (!$('#connectionPanel').classList.contains('open')) {
+    document.body.classList.remove('drawer-open');
+  }
 }
 
 function updateMenu() {
@@ -833,10 +851,15 @@ function startFastLoad() {
 
 function fillStores() {
   const select = $('#storeFilter');
-  if (!select) return;
+  const buttonText = $('#storePickerText');
+  const menu = $('#storePickerMenu');
+
+  if (!select || !buttonText || !menu) return;
 
   if (!Array.isArray(LIVE_STORES) || !LIVE_STORES.length) {
     select.innerHTML = '<option value="">Склады не найдены</option>';
+    menu.innerHTML = '<div class="store-picker-empty">Склады не найдены</div>';
+    buttonText.textContent = 'Склады не найдены';
     state.storeId = '';
     select.value = '';
     return;
@@ -855,7 +878,63 @@ function fillStores() {
   }
 
   select.value = state.storeId;
+
+  const selected = LIVE_STORES.find(
+    (store) => String(store.id) === String(state.storeId)
+  ) || LIVE_STORES[0];
+
+  buttonText.textContent = selected?.name || 'Выберите склад';
+
+  menu.innerHTML = LIVE_STORES.map((store) => `
+    <button
+      type="button"
+      class="store-picker-option ${String(store.id) === String(state.storeId) ? 'active' : ''}"
+      role="option"
+      aria-selected="${String(store.id) === String(state.storeId) ? 'true' : 'false'}"
+      data-store-picker-id="${escAttr(store.id)}"
+    >
+      <span>${escapeHtml(store.name)}</span>
+      <b>${String(store.id) === String(state.storeId) ? '✓' : ''}</b>
+    </button>
+  `).join('');
+
+  $$('[data-store-picker-id]').forEach((option) => {
+    option.addEventListener('click', () => {
+      const nextId = option.dataset.storePickerId;
+      select.value = nextId;
+      closeStorePicker();
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
 }
+
+function openStorePicker() {
+  const menu = $('#storePickerMenu');
+  const button = $('#storePickerButton');
+  if (!menu || !button || !LIVE_STORES.length) return;
+
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  button.classList.add('open');
+}
+
+function closeStorePicker() {
+  const menu = $('#storePickerMenu');
+  const button = $('#storePickerButton');
+  if (!menu || !button) return;
+
+  menu.hidden = true;
+  button.setAttribute('aria-expanded', 'false');
+  button.classList.remove('open');
+}
+
+function toggleStorePicker() {
+  const menu = $('#storePickerMenu');
+  if (!menu) return;
+  if (menu.hidden) openStorePicker();
+  else closeStorePicker();
+}
+
 
 function getBalanceRows({ paged = true } = {}) {
   let rows = (state.liveStockItems || []).map((item) => ({
@@ -2056,9 +2135,28 @@ $('#refreshBtn').addEventListener('click', () => {
   }
 });
 
+
+$('#storePickerButton').addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleStorePicker();
+});
+
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.store-picker-field')) {
+    closeStorePicker();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeStorePicker();
+  }
+});
+
 $('#storeFilter').addEventListener('change', (event) => {
   state.storeId = event.target.value;
   state.page = 1;
+  fillStores();
 
   if (state.tab === 'balances') {
     state.liveStockLoaded = false;
@@ -2286,6 +2384,9 @@ $('#logoutBtn').addEventListener('click', async () => {
     }
   } catch {}
 
+  // Important for Telegram Mini App: do not immediately sign the same TG ID
+  // back in after logout. Keep the login form visible until the user chooses.
+  localStorage.setItem(MANUAL_LOGIN_KEY, '1');
   clearAuth();
   location.reload();
 });

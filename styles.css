@@ -2121,3 +2121,175 @@ html, body { background: #090a0c; }
   font-size: 12px;
   text-align: center;
 }
+
+
+/* v66 — Telegram drawer scrolling + store picker + explicit logout */
+
+html,
+body {
+  min-height: 100%;
+}
+
+body.drawer-open {
+  overflow: hidden !important;
+  touch-action: none;
+}
+
+.side-menu,
+.connection-panel {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+.side-menu {
+  height: 100dvh !important;
+  max-height: 100dvh;
+  padding-bottom: calc(22px + env(safe-area-inset-bottom)) !important;
+}
+
+.side-menu__nav {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.connection-panel {
+  max-height: 100dvh;
+  padding-bottom: calc(26px + env(safe-area-inset-bottom)) !important;
+}
+
+/* Hide the native select; application logic still uses it internally. */
+.store-filter-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+.store-picker-field {
+  position: relative;
+}
+
+.store-picker-button {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  color: #f3f6fa;
+  background: #0b0d10;
+  border: 1px solid #303744;
+  border-radius: 13px;
+  text-align: left;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  outline: none;
+}
+
+.store-picker-button:hover,
+.store-picker-button.open,
+.store-picker-button:focus-visible {
+  border-color: #66748a;
+  background: #0e1115;
+}
+
+.store-picker-button #storePickerText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-picker-chevron {
+  flex: 0 0 auto;
+  color: #8d98a8;
+  font-size: 18px;
+  transition: transform .15s ease;
+}
+
+.store-picker-button.open .store-picker-chevron {
+  transform: rotate(180deg);
+}
+
+.store-picker-menu {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(430px, calc(100vw - 44px));
+  max-height: min(420px, 55dvh);
+  padding: 7px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  background: #111419;
+  border: 1px solid #303744;
+  border-radius: 15px;
+  box-shadow: 0 20px 55px rgba(0,0,0,.48);
+}
+
+.store-picker-option {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px;
+  color: #c9d1dc;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.store-picker-option:hover {
+  background: #191e25;
+}
+
+.store-picker-option.active {
+  color: #fff;
+  background: #232a34;
+}
+
+.store-picker-option b {
+  color: #d9e2ef;
+}
+
+.store-picker-empty {
+  padding: 14px;
+  color: #808b9b;
+  text-align: center;
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .store-picker-menu {
+    position: fixed;
+    z-index: 850;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 55dvh;
+    border-radius: 20px;
+    box-shadow: 0 24px 90px rgba(0,0,0,.68);
+  }
+
+  .store-picker-option {
+    min-height: 50px;
+    font-size: 15px;
+  }
+}
