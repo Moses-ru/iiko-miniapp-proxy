@@ -5,17 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090a0c">
   <title>iiko Office</title>
-  <link rel="icon" type="image/svg+xml" href="./assets/app-icon.svg?v=67">
-  <link rel="apple-touch-icon" href="./assets/app-icon.svg?v=67">
+  <link rel="icon" type="image/svg+xml" href="./assets/app-icon.svg?v=69">
+  <link rel="apple-touch-icon" href="./assets/app-icon.svg?v=69">
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="./styles.css?v=67">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=69">
 </head>
 <body class="auth-pending">
 
   <section id="authGate" class="auth-gate">
     <div class="auth-card">
-      <div class="auth-logo"><img src="./assets/logo.svg?v=67" alt=""></div>
+      <div class="auth-logo"><img src="./assets/logo.svg?v=69" alt=""></div>
       <div class="auth-heading">
         <span>iiko Office</span>
         <h2 id="authTitle">Подключение</h2>
@@ -66,42 +69,35 @@
             <span>Сервер</span>
             <select id="loginConnection" required></select>
           </label>
-          <div class="auth-two">
-            <label>
-              <span>Логин iiko</span>
-              <input id="loginIikoLogin" autocomplete="username" required>
-            </label>
-            <label>
-              <span>Пароль iiko</span>
-              <input id="loginIikoPassword" type="password" autocomplete="current-password" required>
-            </label>
-          </div>
-          <button class="auth-primary" type="submit">Войти через iiko</button>
-        </form>
 
-        <div class="auth-divider"><span>либо</span></div>
-
-        <button id="telegramLoginBtn" class="auth-secondary" type="button">
-          Войти через Telegram
-        </button>
-
-        <p class="auth-small">
-          Если вы новый пользователь: откройте Mini App в Telegram, выберите сервер и войдите своим логином iiko. Telegram ID привяжется автоматически. Владелец только подтвердит вашу роль.
-        </p>
-
-        <div id="ownerClaimBox" class="owner-claim" hidden>
-          <div class="auth-divider"><span>первичная привязка владельца</span></div>
           <label>
-            <span>Код владельца</span>
-            <input id="ownerCode" type="password" autocomplete="one-time-code">
+            <span>Логин iiko</span>
+            <input
+              id="loginIikoLogin"
+              autocomplete="username"
+              placeholder="Ваш логин iiko"
+              required
+            >
           </label>
-          <button id="ownerLoginBtn" class="auth-secondary" type="button">
-            Привязать этот Telegram как владельца
-          </button>
+
+          <label>
+            <span>Пароль iiko</span>
+            <input
+              id="loginIikoPassword"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Ваш пароль iiko"
+              required
+            >
+          </label>
+
+          <button class="auth-primary" type="submit">Войти</button>
+
           <p class="auth-small">
-            Нужно только один раз, если первый сервер был настроен с компьютера.
+            Если приложение открыто из Telegram, ваш Telegram ID автоматически
+            привяжется к этому аккаунту iiko после успешного входа.
           </p>
-        </div>
+        </form>
       </div>
 
       <div id="authError" class="auth-error" hidden></div>
@@ -125,7 +121,7 @@
 
     <div id="adminPanel" hidden>
       <div class="connection-panel__section">
-        <span class="connection-panel__label">Пользователи / заявки</span>
+        <span class="connection-panel__label">Пользователи</span>
         <div id="registrationList" class="registration-list"></div>
       </div>
 
@@ -225,57 +221,77 @@
     </button>
 
     <div class="brand">
-      <div class="brand__mark"><img src="./assets/logo.svg?v=67" alt=""></div>
+      <div class="brand__mark"><img src="./assets/logo.svg?v=69" alt=""></div>
       <div class="brand__text">
         <h1 id="pageTitle">iiko Office</h1>
         <p id="connectionStatus">Подключение…</p>
       </div>
     </div>
 
+    <div id="desktopContextSlot" class="desktop-context-slot"></div>
+
     <button id="connectionBtn" class="connection-button" type="button">
       <span id="connectionName">Сервер</span>
       <small id="connectionRole">—</small>
     </button>
 
-    <button id="refreshBtn" class="refresh-button" type="button">
+    <button
+      id="refreshBtn"
+      class="refresh-button refresh-button--icon"
+      type="button"
+      aria-label="Обновить"
+      title="Обновить"
+    >
       <span class="refresh-button__icon">↻</span>
-      <span class="refresh-button__text">Обновить</span>
     </button>
   </header>
 
   <main class="app-main">
     <section id="balanceControls" class="controls-panel">
-      <div class="controls-row">
-        <div class="field field--store store-picker-field">
-          <span class="field__label">Склад</span>
+      <div id="mobileContextSlot" class="mobile-context-slot">
+        <div id="contextControls" class="controls-row">
+          <div class="field field--store store-picker-field">
+            <span class="field__label">Склад</span>
 
-          <button
-            id="storePickerButton"
-            class="store-picker-button"
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded="false"
-          >
-            <span id="storePickerText">Загрузка складов…</span>
-            <span class="store-picker-chevron">⌄</span>
-          </button>
+            <button
+              id="storePickerButton"
+              class="store-picker-button"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+            >
+              <span id="storePickerText">Загрузка складов…</span>
+              <span class="store-picker-chevron">⌄</span>
+            </button>
 
-          <div
-            id="storePickerMenu"
-            class="store-picker-menu"
-            role="listbox"
-            hidden
-          ></div>
+            <div
+              id="storePickerMenu"
+              class="store-picker-menu"
+              role="listbox"
+              hidden
+            ></div>
 
-          <select id="storeFilter" class="store-filter-native" tabindex="-1" aria-hidden="true">
-            <option value="">Загрузка складов…</option>
-          </select>
+            <select id="storeFilter" class="store-filter-native" tabindex="-1" aria-hidden="true">
+              <option value="">Загрузка складов…</option>
+            </select>
+          </div>
+
+          <label class="search-field">
+            <span class="search-field__icon">⌕</span>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="Поиск">
+          </label>
         </div>
 
-        <label class="search-field">
-          <span class="search-field__icon">⌕</span>
-          <input id="searchInput" type="search" autocomplete="off" placeholder="Товар или артикул">
-        </label>
+        <section id="periodControls" class="period-panel" hidden>
+          <label class="field">
+            <span class="field__label">С даты</span>
+            <input id="dateFrom" type="date">
+          </label>
+          <label class="field">
+            <span class="field__label">По дату</span>
+            <input id="dateTo" type="date">
+          </label>
+        </section>
       </div>
 
       <div id="balanceFilterChips" class="filter-chips" role="group" aria-label="Фильтр остатков">
@@ -283,17 +299,6 @@
         <button class="filter-chip" type="button" data-balance-filter="stock">Только с остатком</button>
         <button class="filter-chip filter-chip--danger" type="button" data-balance-filter="negative">Отрицательные</button>
       </div>
-    </section>
-
-    <section id="periodControls" class="period-panel" hidden>
-      <label class="field">
-        <span class="field__label">С даты</span>
-        <input id="dateFrom" type="date">
-      </label>
-      <label class="field">
-        <span class="field__label">По дату</span>
-        <input id="dateTo" type="date">
-      </label>
     </section>
 
     <section id="summary" class="summary-grid" aria-live="polite"></section>
@@ -305,7 +310,7 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="./config.js?v=67"></script>
-  <script type="module" src="./app.js?v=67"></script>
+  <script src="./config.js?v=69"></script>
+  <script type="module" src="./app.js?v=69"></script>
 </body>
 </html>

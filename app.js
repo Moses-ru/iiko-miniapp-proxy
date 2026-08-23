@@ -121,6 +121,7 @@ function isPendingAccess() {
 function renderPendingAccess() {
   configureMainControls({
     showStore: false,
+    showSearch: false,
     showBalanceFilters: false,
     showDates: false
   });
@@ -226,61 +227,96 @@ async function loadOwnerRegistrations() {
     }
 
     list.innerHTML = rows.map((row) => `
-      <div class="registration-item ${row.role === 'PENDING' ? 'pending' : ''}">
-        <div class="registration-item__main">
-          <strong>${escapeHtml(row.name || row.telegramId)}</strong>
-          <span>${escapeHtml(row.connectionName)}</span>
-          <small>
-            TG: ${escapeHtml(row.telegramId)}
-            ${row.iikoLogin ? ` · iiko: ${escapeHtml(row.iikoLogin)}` : ''}
-          </small>
-        </div>
-        <div class="registration-item__actions">
-          ${row.role === 'PENDING'
-            ? `
-              <select
-                class="registration-role-select"
-                data-registration-role
-                data-user-id="${escAttr(row.userId)}"
-                data-connection-id="${escAttr(row.connectionId)}"
-              >
-                <option value="CHEF">Шеф-повар</option>
-                <option value="BAR_MANAGER">Бар-менеджер</option>
-                <option value="MANAGER">Менеджер</option>
-                <option value="MANAGING">Управляющий</option>
-              </select>
-              <button
-                class="auth-secondary registration-approve"
-                type="button"
-                data-approve-registration
-                data-user-id="${escAttr(row.userId)}"
-                data-connection-id="${escAttr(row.connectionId)}"
-              >Подтвердить</button>
-            `
-            : `<span class="registration-role-badge">${escapeHtml(row.roleLabel)}</span>`
-          }
-        </div>
-      </div>
+      <details class="admin-user-card ${row.role === 'PENDING' ? 'pending' : ''}">
+        <summary>
+          <div>
+            <strong>${escapeHtml(row.name || row.telegramId)}</strong>
+            <small>
+              ${escapeHtml(row.connectionName)}
+              · ${escapeHtml(row.roleLabel)}
+            </small>
+          </div>
+          <span>›</span>
+        </summary>
+
+        <form
+          class="admin-user-edit"
+          data-admin-user-form
+          data-user-id="${escAttr(row.userId)}"
+          data-connection-id="${escAttr(row.connectionId)}"
+        >
+          <label>
+            <span>Имя</span>
+            <input name="displayName" value="${escAttr(row.name || '')}" required>
+          </label>
+
+          <label>
+            <span>Telegram ID</span>
+            <input name="telegramId" value="${escAttr(row.telegramId || '')}" required>
+          </label>
+
+          <label>
+            <span>Логин iiko</span>
+            <input name="iikoLogin" value="${escAttr(row.iikoLogin || '')}" required>
+          </label>
+
+          <label>
+            <span>Новый пароль iiko</span>
+            <input
+              name="iikoPassword"
+              type="password"
+              placeholder="Не менять"
+              autocomplete="new-password"
+            >
+          </label>
+
+          <label>
+            <span>Роль</span>
+            <select name="role">
+              <option value="PENDING" ${row.role === 'PENDING' ? 'selected' : ''}>Ожидает подтверждения</option>
+              <option value="CHEF" ${row.role === 'CHEF' ? 'selected' : ''}>Шеф-повар</option>
+              <option value="BAR_MANAGER" ${row.role === 'BAR_MANAGER' ? 'selected' : ''}>Бар-менеджер</option>
+              <option value="MANAGER" ${row.role === 'MANAGER' ? 'selected' : ''}>Менеджер</option>
+              <option value="MANAGING" ${row.role === 'MANAGING' ? 'selected' : ''}>Управляющий</option>
+              <option value="OWNER" ${row.role === 'OWNER' ? 'selected' : ''}>Владелец</option>
+            </select>
+          </label>
+
+          <div class="admin-user-actions">
+            <button class="auth-secondary" type="submit">Сохранить</button>
+            ${row.role !== 'OWNER'
+              ? `<button
+                   class="admin-user-remove"
+                   type="button"
+                   data-remove-admin-user
+                 >Удалить</button>`
+              : ''
+            }
+          </div>
+        </form>
+      </details>
     `).join('');
 
-    $$('[data-approve-registration]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const userId = button.dataset.userId;
-        const connectionId = button.dataset.connectionId;
-        const select = $(
-          `[data-registration-role][data-user-id="${CSS.escape(userId)}"][data-connection-id="${CSS.escape(connectionId)}"]`
-        );
+    $$('[data-admin-user-form]').forEach((form) => {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const fd = new FormData(form);
 
         try {
           const response = await apiFetch(
-            `${cfg.workerUrl}/api/admin/registrations/role`,
+            `${cfg.workerUrl}/api/admin/users/update`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                userId,
-                connectionId,
-                role: select.value
+                userId: form.dataset.userId,
+                connectionId: form.dataset.connectionId,
+                displayName: fd.get('displayName'),
+                telegramId: fd.get('telegramId'),
+                iikoLogin: fd.get('iikoLogin'),
+                iikoPassword: fd.get('iikoPassword'),
+                role: fd.get('role')
               })
             }
           );
@@ -291,7 +327,43 @@ async function loadOwnerRegistrations() {
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          toast('Роль назначена');
+          toast('Пользователь сохранён');
+          await loadOwnerRegistrations();
+        } catch (error) {
+          toast(error.message);
+        }
+      });
+    });
+
+    $$('[data-remove-admin-user]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const form = button.closest('[data-admin-user-form]');
+        if (!form) return;
+
+        if (!confirm('Удалить доступ этого пользователя к ресторану?')) {
+          return;
+        }
+
+        try {
+          const response = await apiFetch(
+            `${cfg.workerUrl}/api/admin/users/remove`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: form.dataset.userId,
+                connectionId: form.dataset.connectionId
+              })
+            }
+          );
+
+          const payload = await response.json();
+
+          if (!response.ok || payload.ok === false) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          toast('Доступ удалён');
           await loadOwnerRegistrations();
         } catch (error) {
           toast(error.message);
@@ -302,6 +374,7 @@ async function loadOwnerRegistrations() {
     list.innerHTML = `<div class="panel-empty">${escapeHtml(error.message)}</div>`;
   }
 }
+
 
 function renderConnectionPanel() {
   const list = $('#connectionList');
@@ -431,7 +504,6 @@ async function iikoLogin() {
   });
 
   $('#loginIikoPassword').value = '';
-  localStorage.removeItem(MANUAL_LOGIN_KEY);
   saveAuth(payload.token, payload.me);
 }
 
@@ -466,42 +538,19 @@ async function initializeAuth() {
       'Владелец подключает первый iikoServer один раз.';
     $('#firstSetupForm').hidden = false;
     $('#loginChoiceBox').hidden = true;
-    $('#ownerClaimBox').hidden = true;
     return false;
   }
 
   $('#firstSetupForm').hidden = true;
   $('#loginChoiceBox').hidden = false;
-  $('#ownerClaimBox').hidden = true;
 
-  $('#authTitle').textContent = 'Вход';
+  $('#authTitle').textContent = 'Вход в iiko Office';
   $('#authHint').textContent =
-    'Войдите аккаунтом iiko. Если вы новый пользователь и открыли Mini App в Telegram, ваш Telegram ID привяжется автоматически. Либо войдите через Telegram, если привязка уже есть.';
+    telegramInitData()
+      ? 'Введите свой логин и пароль iiko. Telegram привяжется автоматически.'
+      : 'Выберите сервер и войдите своим аккаунтом iiko.';
 
   await loadPublicConnections();
-
-  // Inside Telegram auto-login only until the user explicitly presses Logout.
-  // After logout we keep the login screen open so the owner can test another
-  // iiko account (chef/accountant/etc.) inside the same Telegram Mini App.
-  const manualLoginRequested =
-    localStorage.getItem(MANUAL_LOGIN_KEY) === '1';
-
-  if (telegramInitData() && !manualLoginRequested) {
-    try {
-      await telegramLogin();
-      return true;
-    } catch (error) {
-      $('#authHint').textContent =
-        `${error.message} Можно войти аккаунтом iiko ниже.`;
-      if (/доступ|выдан/i.test(error.message)) {
-        $('#ownerClaimBox').hidden = false;
-      }
-    }
-  } else if (telegramInitData() && manualLoginRequested) {
-    $('#authHint').textContent =
-      'Вы вышли из Telegram-входа. Теперь можно войти другим аккаунтом iiko или снова нажать «Войти через Telegram».';
-  }
-
   return false;
 }
 
@@ -682,13 +731,9 @@ function metrics(items) {
   `).join('');
 }
 
-async function apiLiveStock({ forceRefresh = false } = {}) {
-  const selectedStore = LIVE_STORES.find((store) =>
-    String(store.id) === String(state.storeId)
-  ) || LIVE_STORES[0];
-
+async function fetchLiveStockForStore(store, { forceRefresh = false } = {}) {
   const params = new URLSearchParams({
-    store: selectedStore.name,
+    store: store.name,
     q: '',
     limit: '5000',
     offset: '0'
@@ -707,20 +752,79 @@ async function apiLiveStock({ forceRefresh = false } = {}) {
     }
   );
 
-  const text = await response.text();
-  let payload;
-
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error(`Worker вернул не JSON (HTTP ${response.status})`);
-  }
+  const payload = await response.json();
 
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
 
   return payload;
+}
+
+function mergeLiveStockPayloads(payloads) {
+  const map = new Map();
+
+  for (const payload of payloads) {
+    for (const item of payload.items || []) {
+      const key = String(item.id || item.productNum || item.productName || '');
+      if (!key) continue;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          ...item,
+          quantity: Number(item.quantity || 0),
+          startQuantity: Number(item.startQuantity || 0),
+          endSum: Number(item.endSum || 0),
+          balanceStatus: 'ok'
+        });
+      } else {
+        const target = map.get(key);
+        target.quantity += Number(item.quantity || 0);
+        target.startQuantity += Number(item.startQuantity || 0);
+        target.endSum += Number(item.endSum || 0);
+      }
+    }
+  }
+
+  const items = [...map.values()].sort((a, b) =>
+    String(a.productName || '').localeCompare(
+      String(b.productName || ''),
+      'ru',
+      { sensitivity: 'base', numeric: true }
+    )
+  );
+
+  return {
+    ok: true,
+    storeName: 'Все склады',
+    pagination: {
+      offset: 0,
+      limit: items.length,
+      total: items.length,
+      returned: items.length,
+      hasMore: false
+    },
+    items,
+    time: new Date().toISOString()
+  };
+}
+
+async function apiLiveStock({ forceRefresh = false } = {}) {
+  if (state.storeId === '__ALL__') {
+    const payloads = await Promise.all(
+      LIVE_STORES.map((store) =>
+        fetchLiveStockForStore(store, { forceRefresh })
+      )
+    );
+
+    return mergeLiveStockPayloads(payloads);
+  }
+
+  const selectedStore = LIVE_STORES.find((store) =>
+    String(store.id) === String(state.storeId)
+  ) || LIVE_STORES[0];
+
+  return fetchLiveStockForStore(selectedStore, { forceRefresh });
 }
 
 function formatUpdatedTime(value) {
@@ -786,7 +890,7 @@ function applyLiveStockPayload(payload, { cachedPreview = false } = {}) {
       `Сохранённые данные · обновляем…`;
   } else {
     $('#connectionStatus').textContent =
-      `iikoOffice ОСВ · 1 запрос на склад · ${formatUpdatedTime(state.lastUpdatedAt)}`;
+      `iikoOffice · текущий остаток · ${formatUpdatedTime(state.lastUpdatedAt)}`;
   }
 
   renderBalances();
@@ -856,6 +960,13 @@ function startFastLoad() {
   loadBalances();
 }
 
+function storesForPicker() {
+  const allowAll = ['balances', 'turnover', 'dashboard'].includes(state.tab);
+  return allowAll
+    ? [{ id: '__ALL__', name: 'Все склады' }, ...LIVE_STORES]
+    : LIVE_STORES;
+}
+
 function fillStores() {
   const select = $('#storeFilter');
   const buttonText = $('#storePickerText');
@@ -863,7 +974,9 @@ function fillStores() {
 
   if (!select || !buttonText || !menu) return;
 
-  if (!Array.isArray(LIVE_STORES) || !LIVE_STORES.length) {
+  const pickerStores = storesForPicker();
+
+  if (!Array.isArray(pickerStores) || !pickerStores.length) {
     select.innerHTML = '<option value="">Склады не найдены</option>';
     menu.innerHTML = '<div class="store-picker-empty">Склады не найдены</div>';
     buttonText.textContent = 'Склады не найдены';
@@ -872,27 +985,27 @@ function fillStores() {
     return;
   }
 
-  const previous = state.storeId || LIVE_STORES[0].id;
+  const previous = state.storeId || pickerStores[0].id;
 
-  select.innerHTML = LIVE_STORES.map((store) =>
+  select.innerHTML = pickerStores.map((store) =>
     `<option value="${escAttr(store.id)}">${escapeHtml(store.name)}</option>`
   ).join('');
 
-  if (LIVE_STORES.some((store) => String(store.id) === String(previous))) {
+  if (pickerStores.some((store) => String(store.id) === String(previous))) {
     state.storeId = previous;
   } else {
-    state.storeId = LIVE_STORES[0].id;
+    state.storeId = pickerStores[0].id;
   }
 
   select.value = state.storeId;
 
-  const selected = LIVE_STORES.find(
+  const selected = pickerStores.find(
     (store) => String(store.id) === String(state.storeId)
-  ) || LIVE_STORES[0];
+  ) || pickerStores[0];
 
   buttonText.textContent = selected?.name || 'Выберите склад';
 
-  menu.innerHTML = LIVE_STORES.map((store) => `
+  menu.innerHTML = pickerStores.map((store) => `
     <button
       type="button"
       class="store-picker-option ${String(store.id) === String(state.storeId) ? 'active' : ''}"
@@ -982,16 +1095,42 @@ function getBalanceRows({ paged = true } = {}) {
   return rows.slice(start, start + state.pageSize);
 }
 
+function relocateContextControls() {
+  const desktop = $('#desktopContextSlot');
+  const mobile = $('#mobileContextSlot');
+  const controls = $('#contextControls');
+  const period = $('#periodControls');
+
+  if (!desktop || !mobile || !controls || !period) return;
+
+  const desktopMode = window.matchMedia('(min-width: 1100px)').matches;
+  const target = desktopMode ? desktop : mobile;
+
+  if (controls.parentElement !== target) target.appendChild(controls);
+  if (period.parentElement !== target) target.appendChild(period);
+
+  document.body.classList.toggle('desktop-context', desktopMode);
+}
+
 function configureMainControls({
   showStore = true,
+  showSearch = true,
   showBalanceFilters = false,
   showDates = false
 } = {}) {
+  relocateContextControls();
+
   $('#balanceControls').hidden = false;
   $('#periodControls').hidden = !showDates;
 
   const storeField = document.querySelector('.field--store');
   if (storeField) storeField.hidden = !showStore;
+
+  const searchField = document.querySelector('.search-field');
+  if (searchField) searchField.hidden = !showSearch;
+
+  const controls = $('#contextControls');
+  if (controls) controls.hidden = !showStore && !showSearch;
 
   const balanceFilters = $('#balanceFilterChips');
   if (balanceFilters) balanceFilters.hidden = !showBalanceFilters;
@@ -1010,9 +1149,12 @@ function renderBalances() {
     row.balanceStatus === 'not_on_store_or_no_balance'
   ).length;
 
-  const selectedStore = LIVE_STORES.find((store) =>
-    String(store.id) === String(state.storeId)
-  );
+  const selectedStore =
+    state.storeId === '__ALL__'
+      ? { name: 'Все склады' }
+      : LIVE_STORES.find((store) =>
+          String(store.id) === String(state.storeId)
+        );
 
   metrics([
     ['Склад', selectedStore?.name || '—'],
@@ -1168,6 +1310,7 @@ function filteredDocuments() {
 function renderDocuments() {
   configureMainControls({
     showStore: true,
+    showSearch: true,
     showBalanceFilters: false,
     showDates: true
   });
@@ -1710,17 +1853,17 @@ function renderDishDetail() {
 }
 
 
-async function apiTurnover({ forceRefresh = false } = {}) {
+async function fetchTurnoverForStore(store, { forceRefresh = false } = {}) {
   if (!state.from || !state.to) {
-    setDefaultDates();
+    const today = isoDateLocal(new Date());
+    state.from = today;
+    state.to = today;
+    $('#dateFrom').value = today;
+    $('#dateTo').value = today;
   }
 
-  const selectedStore = LIVE_STORES.find((store) =>
-    String(store.id) === String(state.storeId)
-  ) || LIVE_STORES[0];
-
   const params = new URLSearchParams({
-    store: selectedStore.name,
+    store: store.name,
     from: state.from,
     to: state.to
   });
@@ -1738,20 +1881,69 @@ async function apiTurnover({ forceRefresh = false } = {}) {
     }
   );
 
-  const text = await response.text();
-  let payload;
-
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error(`Worker вернул не JSON (HTTP ${response.status})`);
-  }
+  const payload = await response.json();
 
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
 
   return payload;
+}
+
+function mergeTurnoverPayloads(payloads) {
+  const map = new Map();
+  const numericFields = [
+    'openQty','openAmt','purchaseQty','purchaseAmt','salesQty','salesAmt',
+    'transferQty','transferAmt','writeoffQty','writeoffAmt','inventoryQty','inventoryAmt',
+    'outgoingInvoiceQty','outgoingInvoiceAmt','productionQty','productionAmt',
+    'transformationQty','transformationAmt','returnedQty','returnedAmt',
+    'incomingReturnedQty','incomingReturnedAmt','disassembleQty','disassembleAmt',
+    'costCorrection','otherQty','otherAmt','closeQty','closeAmt'
+  ];
+
+  for (const payload of payloads) {
+    for (const row of payload.rows || []) {
+      const key = String(row.id || row.code || row.name || '');
+      if (!key) continue;
+
+      if (!map.has(key)) {
+        map.set(key, { ...row });
+        continue;
+      }
+
+      const target = map.get(key);
+      for (const field of numericFields) {
+        target[field] = Number(target[field] || 0) + Number(row[field] || 0);
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    storeName: 'Все склады',
+    period: {
+      from: state.from,
+      to: state.to
+    },
+    rows: [...map.values()]
+  };
+}
+
+async function apiTurnover({ forceRefresh = false } = {}) {
+  if (state.storeId === '__ALL__') {
+    const payloads = await Promise.all(
+      LIVE_STORES.map((store) =>
+        fetchTurnoverForStore(store, { forceRefresh })
+      )
+    );
+    return mergeTurnoverPayloads(payloads);
+  }
+
+  const selectedStore = LIVE_STORES.find((store) =>
+    String(store.id) === String(state.storeId)
+  ) || LIVE_STORES[0];
+
+  return fetchTurnoverForStore(selectedStore, { forceRefresh });
 }
 
 async function loadTurnover({ forceRefresh = false } = {}) {
@@ -2091,8 +2283,13 @@ async function apiDashboard({ forceRefresh = false } = {}) {
     scope: state.dashboardScope
   });
 
-  if (state.dashboardScope === 'store' && state.storeId) {
-    params.set('storeId', state.storeId);
+  if (state.dashboardScope === 'store') {
+    const realStoreId =
+      state.storeId === '__ALL__'
+        ? LIVE_STORES[0]?.id
+        : state.storeId;
+
+    if (realStoreId) params.set('storeId', realStoreId);
   }
 
   if (forceRefresh) {
@@ -2124,6 +2321,7 @@ async function loadDashboard({ forceRefresh = false } = {}) {
 
   configureMainControls({
     showStore: false,
+    showSearch: false,
     showBalanceFilters: false,
     showDates: false
   });
@@ -2350,6 +2548,7 @@ function renderDashboard() {
 
   configureMainControls({
     showStore: state.dashboardScope === 'store',
+    showSearch: false,
     showBalanceFilters: false,
     showDates: false
   });
@@ -2619,6 +2818,7 @@ function render() {
   } else if (['autoorder', 'supplierPrices', 'olap'].includes(state.tab)) {
     configureMainControls({
       showStore: false,
+      showSearch: false,
       showBalanceFilters: false,
       showDates: false
     });
@@ -2813,30 +3013,6 @@ $('#iikoLoginForm').addEventListener('submit', async (event) => {
   }
 });
 
-$('#telegramLoginBtn').addEventListener('click', async () => {
-  setAuthError('');
-  try {
-    await telegramLogin();
-    await finishAuthorizedStartup();
-  } catch (error) {
-    setAuthError(error.message);
-  }
-});
-
-$('#ownerLoginBtn').addEventListener('click', async () => {
-  setAuthError('');
-  try {
-    const payload = await publicApi('/api/auth/web-owner', {
-      method: 'POST',
-      body: JSON.stringify({ setupCode: $('#ownerCode').value, initData: telegramInitData() })
-    });
-    saveAuth(payload.token, payload.me);
-    await finishAuthorizedStartup();
-  } catch (error) {
-    setAuthError(error.message);
-  }
-});
-
 $('#firstSetupForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   setAuthError('');
@@ -2939,9 +3115,6 @@ $('#logoutBtn').addEventListener('click', async () => {
     }
   } catch {}
 
-  // Important for Telegram Mini App: do not immediately sign the same TG ID
-  // back in after logout. Keep the login form visible until the user chooses.
-  localStorage.setItem(MANUAL_LOGIN_KEY, '1');
   clearAuth();
   location.reload();
 });
@@ -2957,3 +3130,8 @@ $('#logoutBtn').addEventListener('click', async () => {
     setAuthError(error.message);
   }
 })();
+
+
+window.addEventListener('resize', () => {
+  relocateContextControls();
+});
