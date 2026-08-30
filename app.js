@@ -1562,49 +1562,47 @@ function renderIncomingJournal(data) {
         </small>
       </div>
 
-      <div class="incoming-table incoming-table--head">
-        <span>Дата</span>
-        <span>№ iiko / поставщика</span>
-        <span>Склад</span>
-        <span>Поставщик</span>
-        <span>Сумма</span>
-        <span></span>
-      </div>
-
-      <div class="incoming-list">
+      <div class="incoming-list incoming-list--cards">
         ${rows.length ? rows.map((row) => `
           <button
             type="button"
-            class="incoming-table incoming-document-row"
+            class="incoming-doc-card"
             data-incoming-document="${escapeHtml(row.id)}"
           >
-            <span data-label="Дата">
-              ${documentDateLabel(row.date)}
-            </span>
+            <div class="incoming-doc-card__date">
+              <span>Дата</span>
+              <strong>${documentDateLabel(row.date)}</strong>
+            </div>
 
-            <span data-label="№">
+            <div class="incoming-doc-card__number">
+              <span>Накладная</span>
               <strong>${escapeHtml(row.number || '—')}</strong>
               <small>${escapeHtml(row.invoiceIncomingNumber || '—')}</small>
-            </span>
+            </div>
 
-            <span data-label="Склад">
-              ${escapeHtml(row.stores?.map((store) => store.name).join(', ') || '—')}
-            </span>
+            <div class="incoming-doc-card__store">
+              <span>Склад</span>
+              <strong>${escapeHtml(row.stores?.map((store) => store.name).join(', ') || '—')}</strong>
+            </div>
 
-            <span data-label="Поставщик">
+            <div class="incoming-doc-card__supplier">
+              <span>Поставщик</span>
               <strong>${escapeHtml(row.supplierName || (row.supplierId ? `ID ${shortUuid(row.supplierId)}` : '—'))}</strong>
-              ${row.supplierName
-                ? `<small>${row.supplierCode ? `код ${escapeHtml(row.supplierCode)}` : ''}${row.supplierInn ? `${row.supplierCode ? ' · ' : ''}ИНН ${escapeHtml(row.supplierInn)}` : ''}</small>`
-                : `<small>${row.supplierId ? escapeHtml(shortUuid(row.supplierId)) : ''}</small>`
-              }
-            </span>
+              ${(row.supplierCode || row.supplierInn) ? `
+                <small>
+                  ${row.supplierCode ? `код ${escapeHtml(row.supplierCode)}` : ''}
+                  ${row.supplierInn ? `${row.supplierCode ? ' · ' : ''}ИНН ${escapeHtml(row.supplierInn)}` : ''}
+                </small>
+              ` : ''}
+            </div>
 
-            <span data-label="Сумма">
+            <div class="incoming-doc-card__sum">
+              <span>Сумма</span>
               <strong>${money.format(row.sum || 0)}</strong>
-              ${row.hasDifference ? `<small class="incoming-difference">есть отклонение цены</small>` : ''}
-            </span>
+              ${row.hasDifference ? `<small class="incoming-difference">отклонение цены</small>` : ''}
+            </div>
 
-            <span class="incoming-arrow">›</span>
+            <i class="incoming-doc-card__arrow">›</i>
           </button>
         `).join('') : `
           <div class="dashboard-empty">
@@ -1950,7 +1948,7 @@ function renderIncomingDocumentDetail(payload) {
         <div class="incoming-item-table incoming-item-table--head">
           <span>Товар</span>
           <span>Количество</span>
-          <span>Ед.</span>
+          <span>Ед. изм.</span>
           <span>Цена</span>
           <span>НДС</span>
           <span>Сумма</span>
