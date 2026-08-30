@@ -4487,3 +4487,386 @@ body.authenticated {
     padding: 12px;
   }
 }
+
+
+/* v76 — prices and supplier matrix */
+.price-kpis,
+.matrix-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.price-kpis article,
+.matrix-kpis article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #252c35;
+  border-radius: 15px;
+  background: #111419;
+}
+
+.price-kpis span,
+.price-kpis small,
+.matrix-kpis span,
+.matrix-kpis small {
+  display: block;
+  color: #68768a;
+  font-size: 9px;
+}
+
+.price-kpis span,
+.matrix-kpis span {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.price-kpis strong,
+.matrix-kpis strong {
+  display: block;
+  margin: 6px 0 3px;
+  color: #edf2f7;
+  font-size: 20px;
+}
+
+.price-highlights {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.price-highlights .procurement-card + .procurement-card {
+  margin-top: 0;
+}
+
+.price-mini-list {
+  display: grid;
+}
+
+.price-mini-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 52px;
+  border-top: 1px solid #20262e;
+}
+
+.price-mini-list > div:first-child {
+  border-top: 0;
+}
+
+.price-mini-list > div > span {
+  min-width: 0;
+}
+
+.price-mini-list > div > span:last-child {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.price-mini-list strong,
+.price-mini-list small {
+  display: block;
+}
+
+.price-mini-list strong {
+  color: #e9eef3;
+  font-size: 10px;
+}
+
+.price-mini-list small {
+  margin-top: 3px;
+  color: #637084;
+  font-size: 8px;
+}
+
+.price-change.is-up {
+  color: #dda989 !important;
+}
+
+.price-change.is-down {
+  color: #8fc7a5 !important;
+}
+
+.price-change.is-flat {
+  color: #8190a3 !important;
+}
+
+.price-list {
+  display: grid;
+}
+
+.price-row {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.45fr)
+    repeat(5, minmax(105px, .58fr));
+  gap: 10px;
+  align-items: center;
+  min-height: 66px;
+  border-top: 1px solid #20262e;
+}
+
+.price-row:first-child {
+  border-top: 0;
+}
+
+.price-row > div {
+  min-width: 0;
+}
+
+.price-row span,
+.price-row strong,
+.price-row small {
+  display: block;
+}
+
+.price-row span {
+  color: #657286;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.price-row strong {
+  margin-top: 4px;
+  color: #e9eef3;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.price-row small {
+  margin-top: 3px;
+  color: #637084;
+  font-size: 8px;
+}
+
+.price-row__product > strong {
+  margin-top: 0;
+  font-size: 11px;
+}
+
+.matrix-note {
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  color: #8b98a8;
+  background: #0c0f13;
+  border: 1px solid #252c35;
+  border-radius: 11px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.matrix-list {
+  display: grid;
+}
+
+.matrix-product {
+  border-top: 1px solid #20262e;
+}
+
+.matrix-product:first-child {
+  border-top: 0;
+}
+
+.matrix-product summary {
+  display: grid;
+  grid-template-columns:
+    minmax(240px, 1.5fr)
+    100px
+    minmax(150px, .7fr)
+    18px;
+  gap: 12px;
+  align-items: center;
+  min-height: 68px;
+  padding: 8px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.matrix-product summary::-webkit-details-marker {
+  display: none;
+}
+
+.matrix-product summary > div {
+  min-width: 0;
+}
+
+.matrix-product summary span,
+.matrix-product summary strong,
+.matrix-product summary small {
+  display: block;
+}
+
+.matrix-product summary span {
+  color: #647185;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.matrix-product summary strong {
+  margin-top: 4px;
+  color: #eaf0f5;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.matrix-product summary small {
+  margin-top: 3px;
+  color: #647185;
+  font-size: 8px;
+  overflow-wrap: anywhere;
+}
+
+.matrix-product__name > strong {
+  margin-top: 0 !important;
+}
+
+.matrix-product summary > i {
+  color: #647185;
+  font-style: normal;
+}
+
+.matrix-product[open] summary > i {
+  transform: rotate(180deg);
+}
+
+.matrix-supplier-list {
+  display: grid;
+  gap: 6px;
+  padding: 0 0 12px 20px;
+}
+
+.matrix-supplier {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid #242c35;
+  border-radius: 11px;
+  background: #0c0f13;
+}
+
+.matrix-supplier.is-best {
+  border-color: #46574d;
+}
+
+.matrix-supplier > div {
+  min-width: 0;
+}
+
+.matrix-supplier > div:last-child {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.matrix-supplier strong,
+.matrix-supplier small {
+  display: block;
+}
+
+.matrix-supplier strong {
+  color: #e9eef3;
+  font-size: 10px;
+}
+
+.matrix-supplier small {
+  margin-top: 3px;
+  color: #657286;
+  font-size: 8px;
+}
+
+.matrix-freshness.is-fresh {
+  color: #8fc7a5;
+}
+
+.matrix-freshness.is-warning {
+  color: #d2b67e;
+}
+
+.matrix-freshness.is-old {
+  color: #a37f7f;
+}
+
+.analytics-loading {
+  min-height: 260px;
+}
+
+@media (max-width: 1050px) {
+  .price-row {
+    grid-template-columns:
+      minmax(210px, 1.4fr)
+      repeat(4, minmax(95px, .6fr));
+  }
+
+  .price-row > div:nth-child(6) {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .price-kpis,
+  .matrix-kpis {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .price-highlights {
+    grid-template-columns: 1fr;
+  }
+
+  .price-row {
+    grid-template-columns:
+      minmax(190px, 1.4fr)
+      repeat(3, minmax(90px, .6fr));
+  }
+
+  .price-row > div:nth-child(5),
+  .price-row > div:nth-child(6) {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .price-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 9px 12px;
+    padding: 12px 0;
+  }
+
+  .price-row > div {
+    display: block !important;
+  }
+
+  .price-row__product {
+    grid-column: 1 / -1;
+  }
+
+  .matrix-product summary {
+    grid-template-columns: 1fr auto;
+    gap: 8px 10px;
+    padding: 12px 0;
+  }
+
+  .matrix-product summary > div:first-child {
+    grid-column: 1;
+  }
+
+  .matrix-product summary > div:nth-child(2),
+  .matrix-product summary > div:nth-child(3) {
+    grid-column: 1;
+  }
+
+  .matrix-product summary > i {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+  }
+
+  .matrix-supplier-list {
+    padding-left: 0;
+  }
+}

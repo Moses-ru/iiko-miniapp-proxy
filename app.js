@@ -595,6 +595,9 @@ const state = {
   procurement: null,
   incomingDocuments: null,
   incomingDocumentDetail: null,
+  purchasePriceAnalytics: null,
+  purchaseMatrixAnalytics: null,
+  purchaseAnalyticsLoading: false,
   procurementTab: 'documents',
   documentDetail: null,
   documentDetailLoading: false,
@@ -1288,6 +1291,443 @@ async function apiIncomingDocuments({ forceRefresh = false } = {}) {
   return payload;
 }
 
+async function apiIncomingDocumentBatch(ids) {
+  const params = new URLSearchParams({
+    ids: ids.join(',')
+  });
+
+  const response = await apiFetch(
+    `${cfg.workerUrl}/api/documents/incoming-batch?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store'
+    }
+  );
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(
+      payload.error || `HTTP ${response.status}`
+    );
+  }
+
+  return payload;
+}
+
+async function loadInvoiceDetailsInBatches(rows) {
+  const batches = [];
+
+  for (let index = 0; index < rows.length; index += 20) {
+    batches.push(rows.slice(index, index + 20));
+  }
+
+  const documents = [];
+  const failed = [];
+
+  // Two batch calls at a time: fast enough for the UI without hammering iikoOffice.
+  for (let index = 0; index < batches.length; index += 2) {
+    const pair = batches.slice(index, index + 2);
+
+    const results = await Promise.all(
+      pair.map(async (batch) => {
+        const payload =
+          await apiIncomingDocumentBatch(
+            batch.map((row) => row.id)
+          );
+
+        return payload;
+      })
+    );
+
+    for (const payload of results) {
+      documents.push(...(payload.documents || []));
+      failed.push(...(payload.failed || []));
+    }
+  }
+
+  return { documents, failed };
+}
+
+function dateToIso(value) {
+  return String(value || '').slice(0, 10);
+}
+
+function daysBeforeIso(dateIso, days) {
+  const value = new Date(
+    `${dateIso}T00:00:00Z`
+  );
+
+  if (Number.isNaN(value.getTime())) {
+    return dateIso;
+  }
+
+  value.setUTCDate(value.getUTCDate() - days);
+  return value.toISOString().slice(0, 10);
+}
+
+function invoiceLinesFromDocuments(documents) {
+  const lines = [];
+
+  for (const doc of documents || []) {
+    for (const item of doc.items || []) {
+      const price = Number(item.price);
+      const amount = Number(item.amount);
+      const sum = Number(item.sum);
+
+      if (
+        !Number.isFinite(price) ||
+        !Number.isFinite(amount) ||
+        !Number.isFinite(sum)
+      ) {
+        continue;
+      }
+
+      lines.push({
+        documentId: doc.id,
+        documentNumber: doc.number,
+        invoice: doc.invoice || '',
+        date: dateToIso(doc.date),
+        supplierId: doc.supplierId || '',
+        supplierName:
+          doc.supplierName ||
+          (doc.supplierId ? `ID ${shortUuid(doc.supplierId)}` : '—'),
+        storeId: item.storeId || doc.storeId || '',
+        storeName: doc.storeName || '',
+        productId: item.productId || '',
+        code: item.productNum || item.code || '',
+        name: item.productName || item.productId || 'Товар',
+        unit: item.unit || '—',
+        amount,
+        price,
+        sum,
+        ndsPercent: Number(item.ndsPercent || 0)
+      });
+    }
+  }
+
+  return lines;
+}
+
+function weightedLinePrice(lines) {
+  let amount = 0;
+  let sum = 0;
+
+  for (const line of lines || []) {
+    const quantity = Math.abs(Number(line.amount || 0));
+    const value = Math.abs(Number(line.sum || 0));
+
+    if (quantity <= 0.000001) continue;
+
+    amount += quantity;
+    sum += value;
+  }
+
+  return amount > 0.000001 ? sum / amount : null;
+}
+
+function buildPriceAnalytics(lines, failedCount = 0) {
+  const groups = new Map();
+
+  for (const line of lines) {
+    const key =
+      line.productId ||
+      line.code ||
+      line.name;
+
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+
+    groups.get(key).push(line);
+  }
+
+  const products = [];
+
+  for (const rows of groups.values()) {
+    rows.sort((a, b) =>
+      `${a.date}|${a.documentNumber}`
+        .localeCompare(`${b.date}|${b.documentNumber}`)
+    );
+
+    const last = rows[rows.length - 1];
+    const previous =
+      rows.length > 1
+        ? rows[rows.length - 2]
+        : null;
+
+    const lastPrice = Number(last.price);
+    const previousPrice =
+      previous ? Number(previous.price) : null;
+
+    const changePct =
+      previous &&
+      Number.isFinite(previousPrice) &&
+      Math.abs(previousPrice) > 0.000001
+        ? ((lastPrice - previousPrice) / previousPrice) * 100
+        : null;
+
+    const prices = rows
+      .map((row) => Number(row.price))
+      .filter(Number.isFinite);
+
+    products.push({
+      id: last.productId,
+      code: last.code,
+      name: last.name,
+      unit: last.unit,
+      lastPrice,
+      previousPrice,
+      changePct,
+      weightedAveragePrice:
+        weightedLinePrice(rows),
+      minPrice:
+        prices.length ? Math.min(...prices) : null,
+      maxPrice:
+        prices.length ? Math.max(...prices) : null,
+      lastDate: last.date,
+      lastSupplierName:
+        last.supplierName,
+      supplierCount:
+        new Set(
+          rows.map((row) => row.supplierId).filter(Boolean)
+        ).size,
+      purchaseCount: rows.length,
+      purchaseValue:
+        rows.reduce(
+          (sum, row) => sum + Number(row.sum || 0),
+          0
+        )
+    });
+  }
+
+  products.sort((a, b) =>
+    Number(b.purchaseValue || 0) -
+    Number(a.purchaseValue || 0)
+  );
+
+  return {
+    products,
+    summary: {
+      products: products.length,
+      lines: lines.length,
+      suppliers:
+        new Set(
+          lines.map((row) => row.supplierId).filter(Boolean)
+        ).size,
+      purchaseValue:
+        lines.reduce(
+          (sum, row) => sum + Number(row.sum || 0),
+          0
+        ),
+      failedDocuments: failedCount
+    }
+  };
+}
+
+function buildMatrixAnalytics(lines, asOfDate, historyFrom) {
+  const latest = new Map();
+
+  for (const line of lines) {
+    if (
+      line.date > asOfDate ||
+      line.date < historyFrom ||
+      !line.supplierId
+    ) {
+      continue;
+    }
+
+    const key =
+      `${line.productId || line.code || line.name}|${line.supplierId}`;
+
+    const current = latest.get(key);
+
+    if (
+      !current ||
+      `${line.date}|${line.documentNumber}` >
+        `${current.date}|${current.documentNumber}`
+    ) {
+      latest.set(key, line);
+    }
+  }
+
+  const products = new Map();
+
+  for (const line of latest.values()) {
+    const key =
+      line.productId ||
+      line.code ||
+      line.name;
+
+    if (!products.has(key)) {
+      products.set(key, {
+        id: line.productId,
+        code: line.code,
+        name: line.name,
+        unit: line.unit,
+        suppliers: []
+      });
+    }
+
+    const ageDays = Math.max(
+      0,
+      Math.floor(
+        (
+          new Date(`${asOfDate}T00:00:00Z`).getTime() -
+          new Date(`${line.date}T00:00:00Z`).getTime()
+        ) / 86400000
+      )
+    );
+
+    products.get(key).suppliers.push({
+      supplierId: line.supplierId,
+      supplierName: line.supplierName,
+      price: line.price,
+      date: line.date,
+      ageDays,
+      documentNumber: line.documentNumber,
+      invoice: line.invoice,
+      amount: line.amount
+    });
+  }
+
+  const rows = [...products.values()]
+    .map((product) => {
+      product.suppliers.sort(
+        (a, b) => Number(a.price) - Number(b.price)
+      );
+
+      const best = product.suppliers[0] || null;
+
+      return {
+        ...product,
+        supplierCount: product.suppliers.length,
+        bestPrice: best?.price ?? null,
+        bestSupplierName:
+          best?.supplierName || ''
+      };
+    })
+    .sort((a, b) =>
+      b.supplierCount - a.supplierCount ||
+      String(a.name).localeCompare(String(b.name), 'ru')
+    );
+
+  return {
+    rows,
+    asOfDate,
+    historyFrom,
+    supplierCount:
+      new Set(
+        lines
+          .filter(
+            (line) =>
+              line.date <= asOfDate &&
+              line.date >= historyFrom
+          )
+          .map((line) => line.supplierId)
+          .filter(Boolean)
+      ).size
+  };
+}
+
+async function ensurePriceAnalytics() {
+  if (state.purchasePriceAnalytics) {
+    return state.purchasePriceAnalytics;
+  }
+
+  if (state.purchaseAnalyticsLoading) {
+    return null;
+  }
+
+  state.purchaseAnalyticsLoading = true;
+
+  try {
+    const rows =
+      state.incomingDocuments?.documents || [];
+
+    const loaded =
+      await loadInvoiceDetailsInBatches(rows);
+
+    const lines =
+      invoiceLinesFromDocuments(loaded.documents);
+
+    state.purchasePriceAnalytics =
+      buildPriceAnalytics(
+        lines,
+        loaded.failed.length
+      );
+
+    return state.purchasePriceAnalytics;
+  } finally {
+    state.purchaseAnalyticsLoading = false;
+  }
+}
+
+async function ensureMatrixAnalytics() {
+  if (state.purchaseMatrixAnalytics) {
+    return state.purchaseMatrixAnalytics;
+  }
+
+  if (state.purchaseAnalyticsLoading) {
+    return null;
+  }
+
+  state.purchaseAnalyticsLoading = true;
+
+  try {
+    const asOf =
+      state.to ||
+      new Date().toISOString().slice(0, 10);
+
+    const historyFrom =
+      daysBeforeIso(asOf, 120);
+
+    const params = new URLSearchParams({
+      from: historyFrom,
+      to: asOf,
+      storeId: state.storeId || '__ALL__'
+    });
+
+    const response = await apiFetch(
+      `${cfg.workerUrl}/api/documents/incoming?${params.toString()}`,
+      {
+        method: 'GET',
+        cache: 'no-store'
+      }
+    );
+
+    const list = await response.json();
+
+    if (!response.ok || list.ok === false) {
+      throw new Error(
+        list.error || `HTTP ${response.status}`
+      );
+    }
+
+    const loaded =
+      await loadInvoiceDetailsInBatches(
+        list.documents || []
+      );
+
+    const lines =
+      invoiceLinesFromDocuments(loaded.documents);
+
+    state.purchaseMatrixAnalytics = {
+      ...buildMatrixAnalytics(
+        lines,
+        asOf,
+        historyFrom
+      ),
+      failedDocuments:
+        loaded.failed.length
+    };
+
+    return state.purchaseMatrixAnalytics;
+  } finally {
+    state.purchaseAnalyticsLoading = false;
+  }
+}
+
 async function apiIncomingDocumentDetail(documentId) {
   const response = await apiFetch(
     `${cfg.workerUrl}/api/documents/incoming/${encodeURIComponent(documentId)}`,
@@ -1614,24 +2054,250 @@ function renderIncomingJournal(data) {
   `;
 }
 
-function renderExactPricesInfo() {
-  return `
-    <section class="procurement-card procurement-future">
-      <span>РЕАЛЬНЫЕ ЦЕНЫ УЖЕ ПОДКЛЮЧЕНЫ</span>
-      <h3>Цена каждой строки берётся из накладной</h3>
-      <p>
-        Открой любую приходную накладную: внутри уже показываются
-        фактические количество, цена, сумма и НДС из
-        <strong>getAbstractDocument</strong>.
-      </p>
+function priceChangeClass(value) {
+  const n = Number(value);
 
-      <div class="procurement-future-list">
-        <div>✓ Цена строки — реальная цена документа</div>
-        <div>✓ Количество и сумма — из iikoOffice</div>
-        <div>✓ Код и товар сопоставляются с номенклатурой</div>
-        <div>→ Следом соберём историю цены товара по накладным</div>
+  if (!Number.isFinite(n) || Math.abs(n) < 0.01) {
+    return 'is-flat';
+  }
+
+  return n > 0 ? 'is-up' : 'is-down';
+}
+
+function priceChangeLabel(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return '—';
+
+  return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
+}
+
+function renderAnalyticsLoading(text) {
+  return `
+    <div class="documents-loading analytics-loading">
+      <span class="dashboard-spinner"></span>
+      <strong>${escapeHtml(text)}</strong>
+      <small>Используем только реальные строки приходных накладных</small>
+    </div>
+  `;
+}
+
+function renderExactPricesInfo() {
+  const data = state.purchasePriceAnalytics;
+
+  if (!data) {
+    queueMicrotask(async () => {
+      try {
+        const loaded =
+          await ensurePriceAnalytics();
+
+        if (
+          loaded &&
+          state.procurementTab === 'prices'
+        ) {
+          renderDocuments();
+        }
+      } catch (error) {
+        $('#content').innerHTML = `
+          <div class="procurement-page">
+            <div class="empty-state">
+              <strong>Не удалось собрать цены</strong>
+              ${escapeHtml(error.message)}
+            </div>
+          </div>
+        `;
+      }
+    });
+
+    return renderAnalyticsLoading(
+      'Собираем историю закупочных цен…'
+    );
+  }
+
+  let rows = data.products || [];
+
+  if (state.query) {
+    const query =
+      state.query.toLocaleLowerCase('ru-RU');
+
+    rows = rows.filter((row) =>
+      [
+        row.name,
+        row.code,
+        row.lastSupplierName
+      ]
+        .join(' ')
+        .toLocaleLowerCase('ru-RU')
+        .includes(query)
+    );
+  }
+
+  const increased = [...rows]
+    .filter((row) =>
+      Number(row.changePct) > 0.01
+    )
+    .sort(
+      (a, b) =>
+        Number(b.changePct) -
+        Number(a.changePct)
+    )
+    .slice(0, 8);
+
+  const decreased = [...rows]
+    .filter((row) =>
+      Number(row.changePct) < -0.01
+    )
+    .sort(
+      (a, b) =>
+        Number(a.changePct) -
+        Number(b.changePct)
+    )
+    .slice(0, 8);
+
+  return `
+    <div class="price-kpis">
+      <article>
+        <span>Товаров</span>
+        <strong>${fmt.format(data.summary?.products || 0)}</strong>
+        <small>закупались за период</small>
+      </article>
+
+      <article>
+        <span>Строк накладных</span>
+        <strong>${fmt.format(data.summary?.lines || 0)}</strong>
+        <small>проанализировано</small>
+      </article>
+
+      <article>
+        <span>Подорожало</span>
+        <strong>${fmt.format(rows.filter((row) => Number(row.changePct) > 0.01).length)}</strong>
+        <small>по двум последним закупкам</small>
+      </article>
+
+      <article>
+        <span>Подешевело</span>
+        <strong>${fmt.format(rows.filter((row) => Number(row.changePct) < -0.01).length)}</strong>
+        <small>по двум последним закупкам</small>
+      </article>
+    </div>
+
+    <div class="price-highlights">
+      <section class="procurement-card">
+        <div class="procurement-card__head">
+          <div>
+            <span>РОСТ ЦЕНЫ</span>
+            <h3>Что подорожало</h3>
+          </div>
+        </div>
+
+        <div class="price-mini-list">
+          ${increased.length ? increased.map((row) => `
+            <div>
+              <span>
+                <strong>${escapeHtml(row.name)}</strong>
+                <small>${escapeHtml(row.lastSupplierName || '')}</small>
+              </span>
+
+              <span>
+                <strong>${money.format(row.lastPrice || 0)}</strong>
+                <small class="price-change is-up">${priceChangeLabel(row.changePct)}</small>
+              </span>
+            </div>
+          `).join('') : `
+            <div class="dashboard-empty">Нет роста цены</div>
+          `}
+        </div>
+      </section>
+
+      <section class="procurement-card">
+        <div class="procurement-card__head">
+          <div>
+            <span>СНИЖЕНИЕ ЦЕНЫ</span>
+            <h3>Что подешевело</h3>
+          </div>
+        </div>
+
+        <div class="price-mini-list">
+          ${decreased.length ? decreased.map((row) => `
+            <div>
+              <span>
+                <strong>${escapeHtml(row.name)}</strong>
+                <small>${escapeHtml(row.lastSupplierName || '')}</small>
+              </span>
+
+              <span>
+                <strong>${money.format(row.lastPrice || 0)}</strong>
+                <small class="price-change is-down">${priceChangeLabel(row.changePct)}</small>
+              </span>
+            </div>
+          `).join('') : `
+            <div class="dashboard-empty">Нет снижения цены</div>
+          `}
+        </div>
+      </section>
+    </div>
+
+    <section class="procurement-card prices-card">
+      <div class="procurement-card__head">
+        <div>
+          <span>ФАКТИЧЕСКИЕ ЦЕНЫ</span>
+          <h3>Закупочная цена товаров</h3>
+        </div>
+      </div>
+
+      <div class="price-list">
+        ${rows.map((row) => `
+          <article class="price-row">
+            <div class="price-row__product">
+              <strong>${escapeHtml(row.name)}</strong>
+              <small>
+                ${escapeHtml(row.code || '')}
+                ${row.unit ? ` · ${escapeHtml(row.unit)}` : ''}
+                ${row.lastDate ? ` · ${documentDateLabel(row.lastDate)}` : ''}
+              </small>
+            </div>
+
+            <div>
+              <span>Последняя</span>
+              <strong>${row.lastPrice == null ? '—' : money.format(row.lastPrice)}</strong>
+            </div>
+
+            <div>
+              <span>Предыдущая</span>
+              <strong>${row.previousPrice == null ? '—' : money.format(row.previousPrice)}</strong>
+            </div>
+
+            <div>
+              <span>Изменение</span>
+              <strong class="price-change ${priceChangeClass(row.changePct)}">
+                ${priceChangeLabel(row.changePct)}
+              </strong>
+            </div>
+
+            <div>
+              <span>Средняя</span>
+              <strong>${row.weightedAveragePrice == null ? '—' : money.format(row.weightedAveragePrice)}</strong>
+            </div>
+
+            <div>
+              <span>Мин / макс</span>
+              <strong>
+                ${row.minPrice == null ? '—' : money.format(row.minPrice)}
+                /
+                ${row.maxPrice == null ? '—' : money.format(row.maxPrice)}
+              </strong>
+            </div>
+          </article>
+        `).join('')}
       </div>
     </section>
+
+    ${data.summary?.failedDocuments ? `
+      <div class="dashboard-warning">
+        ${fmt.format(data.summary.failedDocuments)}
+        накладных не удалось открыть, поэтому они не вошли в расчёт.
+      </div>
+    ` : ''}
   `;
 }
 
@@ -1713,25 +2379,185 @@ function renderSupplierFuture() {
   `;
 }
 
-function renderMatrixFuture() {
-  return `
-    <section class="procurement-card procurement-future">
-      <span>МАТРИЦА</span>
-      <h3>Основа для матрицы уже есть</h3>
-      <p>
-        Для каждой открытой накладной получаем товар, поставщика,
-        дату и фактическую цену. Следующий этап — собрать историю
-        строк и выбирать последнюю цену поставщика не позднее
-        выбранной даты.
-      </p>
+function matrixFreshnessClass(days) {
+  const value = Number(days);
 
-      <div class="procurement-future-list">
-        <div>✓ Документы и даты</div>
-        <div>✓ Поставщик UUID</div>
-        <div>✓ Товар UUID и код</div>
-        <div>✓ Фактическая цена строки</div>
+  if (!Number.isFinite(value)) return 'is-old';
+  if (value <= 14) return 'is-fresh';
+  if (value <= 30) return 'is-warning';
+  return 'is-old';
+}
+
+function matrixFreshnessLabel(days) {
+  const value = Number(days);
+
+  if (!Number.isFinite(value)) {
+    return 'дата неизвестна';
+  }
+
+  if (value <= 14) {
+    return `${value} дн.`;
+  }
+
+  if (value <= 30) {
+    return `${value} дн. · внимание`;
+  }
+
+  return `${value} дн. · устарела`;
+}
+
+function renderMatrixFuture() {
+  const data = state.purchaseMatrixAnalytics;
+
+  if (!data) {
+    queueMicrotask(async () => {
+      try {
+        const loaded =
+          await ensureMatrixAnalytics();
+
+        if (
+          loaded &&
+          state.procurementTab === 'matrix'
+        ) {
+          renderDocuments();
+        }
+      } catch (error) {
+        $('#content').innerHTML = `
+          <div class="procurement-page">
+            <div class="empty-state">
+              <strong>Не удалось построить матрицу</strong>
+              ${escapeHtml(error.message)}
+            </div>
+          </div>
+        `;
+      }
+    });
+
+    return renderAnalyticsLoading(
+      'Строим матрицу закупочных цен…'
+    );
+  }
+
+  let rows = data.rows || [];
+
+  if (state.query) {
+    const query =
+      state.query.toLocaleLowerCase('ru-RU');
+
+    rows = rows.filter((row) =>
+      [
+        row.name,
+        row.code,
+        ...(row.suppliers || []).map(
+          (supplier) =>
+            supplier.supplierName
+        )
+      ]
+        .join(' ')
+        .toLocaleLowerCase('ru-RU')
+        .includes(query)
+    );
+  }
+
+  return `
+    <div class="matrix-kpis">
+      <article>
+        <span>Матрица на</span>
+        <strong>${documentDateLabel(data.asOfDate)}</strong>
+        <small>последняя цена не позднее даты</small>
+      </article>
+
+      <article>
+        <span>История</span>
+        <strong>120 дней</strong>
+        <small>с ${documentDateLabel(data.historyFrom)}</small>
+      </article>
+
+      <article>
+        <span>Товаров</span>
+        <strong>${fmt.format(rows.length)}</strong>
+        <small>есть цена хотя бы одного поставщика</small>
+      </article>
+
+      <article>
+        <span>Поставщиков</span>
+        <strong>${fmt.format(data.supplierCount || 0)}</strong>
+        <small>в матрице</small>
+      </article>
+    </div>
+
+    <section class="procurement-card matrix-card">
+      <div class="procurement-card__head">
+        <div>
+          <span>ПОСЛЕДНИЕ ФАКТИЧЕСКИЕ ЦЕНЫ</span>
+          <h3>Матрица продуктов</h3>
+        </div>
+      </div>
+
+      <div class="matrix-note">
+        Для каждого товара берём последнюю фактическую цену
+        каждого поставщика не позднее выбранной даты.
+        Зелёная цена — до 14 дней, жёлтая — 15–30 дней,
+        более 30 дней считается устаревшей.
+      </div>
+
+      <div class="matrix-list">
+        ${rows.map((row) => `
+          <details class="matrix-product">
+            <summary>
+              <div class="matrix-product__name">
+                <strong>${escapeHtml(row.name)}</strong>
+                <small>
+                  ${escapeHtml(row.code || '')}
+                  ${row.unit ? ` · ${escapeHtml(row.unit)}` : ''}
+                </small>
+              </div>
+
+              <div>
+                <span>Поставщиков</span>
+                <strong>${fmt.format(row.supplierCount || 0)}</strong>
+              </div>
+
+              <div>
+                <span>Лучшая цена</span>
+                <strong>${row.bestPrice == null ? '—' : money.format(row.bestPrice)}</strong>
+                <small>${escapeHtml(row.bestSupplierName || '')}</small>
+              </div>
+
+              <i>⌄</i>
+            </summary>
+
+            <div class="matrix-supplier-list">
+              ${(row.suppliers || []).map((supplier, index) => `
+                <div class="matrix-supplier ${index === 0 ? 'is-best' : ''}">
+                  <div>
+                    <strong>${escapeHtml(supplier.supplierName)}</strong>
+                    <small>
+                      ${documentDateLabel(supplier.date)}
+                      · накладная ${escapeHtml(supplier.documentNumber || '—')}
+                    </small>
+                  </div>
+
+                  <div>
+                    <strong>${money.format(supplier.price || 0)}</strong>
+                    <small class="matrix-freshness ${matrixFreshnessClass(supplier.ageDays)}">
+                      ${matrixFreshnessLabel(supplier.ageDays)}
+                    </small>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        `).join('')}
       </div>
     </section>
+
+    ${data.failedDocuments ? `
+      <div class="dashboard-warning">
+        ${fmt.format(data.failedDocuments)}
+        документов истории не удалось открыть.
+      </div>
+    ` : ''}
   `;
 }
 
@@ -3483,6 +4309,8 @@ $('#refreshBtn').addEventListener('click', () => {
   if (state.tab === 'documents') {
     state.procurement = null;
     state.incomingDocuments = null;
+    state.purchasePriceAnalytics = null;
+    state.purchaseMatrixAnalytics = null;
     loadDocuments({ forceRefresh: true });
   } else if (state.tab === 'dishes') {
     state.dishes = [];
@@ -3563,6 +4391,8 @@ $('#dateFrom').addEventListener('change', (event) => {
   if (state.tab === 'documents') {
     state.procurement = null;
     state.incomingDocuments = null;
+    state.purchasePriceAnalytics = null;
+    state.purchaseMatrixAnalytics = null;
     loadDocuments();
   } else if (state.tab === 'turnover') {
     state.turnoverRows = [];
