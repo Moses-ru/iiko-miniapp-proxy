@@ -4454,3 +4454,36 @@ body.authenticated {
     text-transform: uppercase;
   }
 }
+
+
+/* v75 — comfortable inner spacing for the Documents workspace */
+.procurement-page {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: clamp(16px, 2vw, 24px);
+  box-sizing: border-box;
+}
+
+.procurement-page .procurement-header {
+  margin-top: 0;
+}
+
+.procurement-page .procurement-tabs {
+  margin-top: 14px;
+}
+
+.procurement-page > .procurement-card,
+.procurement-page > .procurement-grid,
+.procurement-page > .procurement-kpis,
+.procurement-page > .price-analytics-kpis,
+.procurement-page > .price-analytics-grid,
+.procurement-page > .matrix-summary {
+  max-width: 100%;
+}
+
+@media (max-width: 680px) {
+  .procurement-page {
+    padding: 12px;
+  }
+}

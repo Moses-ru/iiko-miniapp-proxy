@@ -1775,7 +1775,8 @@ function renderDocuments() {
   metrics([]);
 
   $('#content').innerHTML = `
-    <div class="procurement-header">
+    <div class="procurement-page">
+      <div class="procurement-header">
       <div>
         <span class="dashboard-eyebrow">Документы</span>
         <h2>Закупки</h2>
@@ -1803,8 +1804,9 @@ function renderDocuments() {
 
     ${body}
 
-    <div class="dashboard-source">
-      ${escapeHtml(data.source || 'iikoOffice')}
+      <div class="dashboard-source">
+        ${escapeHtml(data.source || 'iikoOffice')}
+      </div>
     </div>
   `;
 
@@ -1880,7 +1882,8 @@ function renderIncomingDocumentDetail(payload) {
   });
 
   $('#content').innerHTML = `
-    <div class="incoming-detail">
+    <div class="procurement-page">
+      <div class="incoming-detail">
       <div class="incoming-detail__top">
         <button
           type="button"
@@ -1991,9 +1994,10 @@ function renderIncomingDocumentDetail(payload) {
         </div>
       </section>
 
-      <div class="dashboard-source">
-        ${escapeHtml(payload.source || 'iikoOffice')}
-        · ID ${escapeHtml(doc.id || '')}
+        <div class="dashboard-source">
+          ${escapeHtml(payload.source || 'iikoOffice')}
+          · ID ${escapeHtml(doc.id || '')}
+        </div>
       </div>
     </div>
   `;
