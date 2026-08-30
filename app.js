@@ -1405,6 +1405,7 @@ function incomingDocumentRows() {
       row.number,
       row.invoiceIncomingNumber,
       row.summary,
+      row.supplierName,
       row.supplierId,
       ...(row.stores || []).map(
         (store) => store.name
@@ -1591,8 +1592,11 @@ function renderIncomingJournal(data) {
             </span>
 
             <span data-label="Поставщик">
-              <strong>${row.supplierId ? `ID ${escapeHtml(shortUuid(row.supplierId))}` : '—'}</strong>
-              <small>название подключим из справочника</small>
+              <strong>${escapeHtml(row.supplierName || (row.supplierId ? `ID ${shortUuid(row.supplierId)}` : '—'))}</strong>
+              ${row.supplierName
+                ? `<small>${row.supplierCode ? `код ${escapeHtml(row.supplierCode)}` : ''}${row.supplierInn ? `${row.supplierCode ? ' · ' : ''}ИНН ${escapeHtml(row.supplierInn)}` : ''}</small>`
+                : `<small>${row.supplierId ? escapeHtml(shortUuid(row.supplierId)) : ''}</small>`
+              }
             </span>
 
             <span data-label="Сумма">
@@ -1634,20 +1638,78 @@ function renderExactPricesInfo() {
 }
 
 function renderSupplierFuture() {
-  return `
-    <section class="procurement-card procurement-future">
-      <span>ПОСТАВЩИКИ</span>
-      <h3>UUID поставщика уже приходит в каждой накладной</h3>
-      <p>
-        Сейчас мы намеренно не придумываем названия.
-        Нужен вызов справочника контрагентов iikoOffice,
-        чтобы сопоставить UUID с настоящим названием поставщика.
-      </p>
+  const rows =
+    state.incomingDocuments?.documents || [];
 
-      <div class="procurement-future-list">
-        <div>✓ Поставщик связан с каждой реальной накладной</div>
-        <div>✓ Уже можно считать число поставщиков</div>
-        <div>→ После справочника появятся названия и рейтинг</div>
+  const bySupplier = new Map();
+
+  for (const row of rows) {
+    if (!row.supplierId) continue;
+
+    const key = row.supplierId;
+    const current =
+      bySupplier.get(key) || {
+        id: key,
+        name:
+          row.supplierName ||
+          `ID ${shortUuid(key)}`,
+        code: row.supplierCode || '',
+        inn: row.supplierInn || '',
+        count: 0,
+        sum: 0
+      };
+
+    current.count += 1;
+    current.sum += Number(row.sum || 0);
+
+    bySupplier.set(key, current);
+  }
+
+  const suppliers = [...bySupplier.values()]
+    .sort((a, b) => b.sum - a.sum);
+
+  return `
+    <section class="procurement-card">
+      <div class="procurement-card__head">
+        <div>
+          <span>ПОСТАВЩИКИ</span>
+          <h3>${fmt.format(suppliers.length)} поставщиков за период</h3>
+        </div>
+      </div>
+
+      <div class="supplier-ranking">
+        ${suppliers.length ? suppliers.map((supplier, index) => `
+          <div class="supplier-ranking__row">
+            <b>${index + 1}</b>
+
+            <div class="supplier-ranking__name">
+              <strong>${escapeHtml(supplier.name)}</strong>
+              <small>
+                ${supplier.code ? `код ${escapeHtml(supplier.code)}` : ''}
+                ${supplier.inn ? `${supplier.code ? ' · ' : ''}ИНН ${escapeHtml(supplier.inn)}` : ''}
+              </small>
+            </div>
+
+            <div>
+              <span>Накладных</span>
+              <strong>${fmt.format(supplier.count)}</strong>
+            </div>
+
+            <div>
+              <span>Закуплено</span>
+              <strong>${money.format(supplier.sum)}</strong>
+            </div>
+
+            <div>
+              <span>Средняя накладная</span>
+              <strong>${money.format(supplier.count ? supplier.sum / supplier.count : 0)}</strong>
+            </div>
+          </div>
+        `).join('') : `
+          <div class="dashboard-empty">
+            Нет поставщиков за выбранный период.
+          </div>
+        `}
       </div>
     </section>
   `;
@@ -1857,8 +1919,13 @@ function renderIncomingDocumentDetail(payload) {
 
         <div>
           <span>Поставщик</span>
-          <strong>${doc.supplierId ? `ID ${escapeHtml(shortUuid(doc.supplierId))}` : '—'}</strong>
-          <small>UUID из документа</small>
+          <strong>${escapeHtml(doc.supplierName || (doc.supplierId ? `ID ${shortUuid(doc.supplierId)}` : '—'))}</strong>
+          <small>
+            ${doc.supplierInn
+              ? `ИНН ${escapeHtml(doc.supplierInn)}`
+              : (doc.supplierId ? escapeHtml(shortUuid(doc.supplierId)) : '')
+            }
+          </small>
         </div>
 
         <div>
@@ -1883,6 +1950,7 @@ function renderIncomingDocumentDetail(payload) {
         <div class="incoming-item-table incoming-item-table--head">
           <span>Товар</span>
           <span>Количество</span>
+          <span>Ед.</span>
           <span>Цена</span>
           <span>НДС</span>
           <span>Сумма</span>
@@ -1898,7 +1966,14 @@ function renderIncomingDocumentDetail(payload) {
 
               <span data-label="Количество">
                 <strong>${fmt.format(item.amount || 0)}</strong>
-                <small>${escapeHtml(item.unit || '')}</small>
+              </span>
+
+              <span data-label="Ед.">
+                <strong>${escapeHtml(item.unit || '—')}</strong>
+                ${item.unitFullName && item.unitFullName !== item.unit
+                  ? `<small>${escapeHtml(item.unitFullName)}</small>`
+                  : ''
+                }
               </span>
 
               <span data-label="Цена">
