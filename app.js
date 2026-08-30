@@ -593,7 +593,9 @@ const state = {
   documents: [],
   documentsLoading: false,
   procurement: null,
-  procurementTab: 'overview',
+  incomingDocuments: null,
+  incomingDocumentDetail: null,
+  procurementTab: 'documents',
   documentDetail: null,
   documentDetailLoading: false,
   documentTypeFilter: 'all',
@@ -1252,7 +1254,7 @@ function renderBalanceRow(row) {
   `;
 }
 
-async function apiProcurement({ forceRefresh = false } = {}) {
+async function apiIncomingDocuments({ forceRefresh = false } = {}) {
   if (!state.from || !state.to) {
     setDefaultDates();
   }
@@ -1268,7 +1270,27 @@ async function apiProcurement({ forceRefresh = false } = {}) {
   }
 
   const response = await apiFetch(
-    `${cfg.workerUrl}/api/purchases-summary?${params.toString()}`,
+    `${cfg.workerUrl}/api/documents/incoming?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store'
+    }
+  );
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(
+      payload.error || `HTTP ${response.status}`
+    );
+  }
+
+  return payload;
+}
+
+async function apiIncomingDocumentDetail(documentId) {
+  const response = await apiFetch(
+    `${cfg.workerUrl}/api/documents/incoming/${encodeURIComponent(documentId)}`,
     {
       method: 'GET',
       cache: 'no-store'
@@ -1301,24 +1323,28 @@ async function loadDocuments({ forceRefresh = false } = {}) {
   metrics([]);
 
   $('#connectionStatus').textContent =
-    'iikoOffice · закупочная аналитика';
+    'iikoOffice · приходные накладные';
 
   $('#content').innerHTML = `
     <div class="documents-loading">
       <span class="dashboard-spinner"></span>
-      <strong>Собираем закупки…</strong>
-      <small>На основе приходного движения iikoOffice</small>
+      <strong>Загружаем приходные накладные…</strong>
+      <small>Прямой read-only запрос iikoOffice</small>
     </div>
   `;
 
   try {
+    state.incomingDocuments =
+      await apiIncomingDocuments({ forceRefresh });
+
     state.procurement =
-      await apiProcurement({ forceRefresh });
+      state.incomingDocuments;
+
     renderDocuments();
   } catch (error) {
     $('#content').innerHTML = `
       <div class="empty-state">
-        <strong>Не удалось собрать закупки</strong>
+        <strong>Не удалось загрузить документы</strong>
         ${escapeHtml(error.message)}
       </div>
     `;
@@ -1327,9 +1353,47 @@ async function loadDocuments({ forceRefresh = false } = {}) {
   }
 }
 
-function procurementRows() {
+function documentDateLabel(value) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  }).format(date);
+}
+
+function documentDateTimeLabel(value) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function shortUuid(value) {
+  const text = String(value || '');
+  if (!text) return '—';
+  return `${text.slice(0, 8)}…${text.slice(-4)}`;
+}
+
+function incomingDocumentRows() {
   const rows =
-    state.procurement?.products || [];
+    state.incomingDocuments?.documents || [];
 
   if (!state.query) return rows;
 
@@ -1338,10 +1402,13 @@ function procurementRows() {
 
   return rows.filter((row) =>
     [
-      row.name,
-      row.code,
-      row.category,
-      ...(row.stores || [])
+      row.number,
+      row.invoiceIncomingNumber,
+      row.summary,
+      row.supplierId,
+      ...(row.stores || []).map(
+        (store) => store.name
+      )
     ]
       .join(' ')
       .toLocaleLowerCase('ru-RU')
@@ -1349,51 +1416,71 @@ function procurementRows() {
   );
 }
 
-function procurementAveragePrice(row) {
-  const price = Number(row.averagePrice);
-  if (!Number.isFinite(price)) return '—';
-
-  return `${money.format(price)} / ${escapeHtml(row.unit || 'ед.')}`;
-}
-
-function procurementPercent(value, total) {
-  const n = Number(value || 0);
-  const t = Number(total || 0);
-  if (t <= 0) return 0;
-  return Math.max(0, Math.min(100, n / t * 100));
-}
-
-function renderProcurementOverview(data) {
+function renderIncomingOverview(data) {
   const summary = data.summary || {};
-  const total = Number(summary.purchaseValue || 0);
-  const rows = procurementRows();
+  const rows = incomingDocumentRows();
 
-  const top = rows.slice(0, 12);
+  const topBySum = [...rows]
+    .sort(
+      (a, b) =>
+        Number(b.sum || 0) -
+        Number(a.sum || 0)
+    )
+    .slice(0, 12);
+
+  const storeTotals = new Map();
+
+  for (const row of rows) {
+    const stores = row.stores?.length
+      ? row.stores
+      : [{ id: '', name: 'Склад не указан' }];
+
+    for (const store of stores) {
+      const current =
+        storeTotals.get(store.id || store.name) || {
+          id: store.id,
+          name: store.name,
+          sum: 0,
+          count: 0
+        };
+
+      current.sum += Number(row.sum || 0);
+      current.count += 1;
+
+      storeTotals.set(
+        store.id || store.name,
+        current
+      );
+    }
+  }
+
+  const stores = [...storeTotals.values()]
+    .sort((a, b) => b.sum - a.sum);
 
   return `
     <div class="procurement-kpis">
       <article>
-        <span>Закуплено</span>
-        <strong>${money.format(total)}</strong>
+        <span>Закупки</span>
+        <strong>${money.format(summary.sum || 0)}</strong>
         <small>${escapeHtml(data.period?.from || '')} — ${escapeHtml(data.period?.to || '')}</small>
       </article>
 
       <article>
-        <span>Товарных позиций</span>
-        <strong>${fmt.format(summary.productCount || 0)}</strong>
-        <small>с приходным движением</small>
+        <span>Накладных</span>
+        <strong>${fmt.format(summary.count || 0)}</strong>
+        <small>реальные документы iikoOffice</small>
       </article>
 
       <article>
-        <span>Складов</span>
-        <strong>${fmt.format(summary.storeCount || 0)}</strong>
-        <small>с закупками</small>
+        <span>Поставщиков</span>
+        <strong>${fmt.format(summary.supplierCount || 0)}</strong>
+        <small>по UUID контрагентов</small>
       </article>
 
       <article>
-        <span>Категорий</span>
-        <strong>${fmt.format(summary.categoryCount || 0)}</strong>
-        <small>в закупках</small>
+        <span>Отклонения цены</span>
+        <strong>${fmt.format(summary.differenceCount || 0)}</strong>
+        <small>флаг iiko hasDifference</small>
       </article>
     </div>
 
@@ -1401,32 +1488,33 @@ function renderProcurementOverview(data) {
       <section class="procurement-card">
         <div class="procurement-card__head">
           <div>
-            <span>ТОП</span>
-            <h3>Закупки по товарам</h3>
+            <span>КРУПНЕЙШИЕ</span>
+            <h3>Приходные накладные</h3>
           </div>
         </div>
 
         <div class="procurement-product-list">
-          ${top.length ? top.map((row, index) => `
-            <div class="procurement-product">
+          ${topBySum.length ? topBySum.map((row, index) => `
+            <button
+              type="button"
+              class="procurement-product incoming-document-row incoming-document-row--compact"
+              data-incoming-document="${escapeHtml(row.id)}"
+            >
               <b>${index + 1}</b>
               <div>
-                <strong>${escapeHtml(row.name)}</strong>
+                <strong>${escapeHtml(row.number || 'Без номера')}</strong>
                 <small>
-                  ${escapeHtml(row.code || '')}
-                  ${row.category ? ` · ${escapeHtml(row.category)}` : ''}
+                  ${documentDateLabel(row.date)}
+                  ${row.invoiceIncomingNumber ? ` · ${escapeHtml(row.invoiceIncomingNumber)}` : ''}
                 </small>
               </div>
               <div>
-                <strong>${money.format(row.value || 0)}</strong>
-                <small>
-                  ${fmt.format(row.quantity || 0)}
-                  ${escapeHtml(row.unit || '')}
-                </small>
+                <strong>${money.format(row.sum || 0)}</strong>
+                <small>${escapeHtml(row.stores?.map((store) => store.name).join(', ') || '—')}</small>
               </div>
-            </div>
+            </button>
           `).join('') : `
-            <div class="dashboard-empty">Нет закупок за период</div>
+            <div class="dashboard-empty">Нет накладных за период</div>
           `}
         </div>
       </section>
@@ -1434,119 +1522,154 @@ function renderProcurementOverview(data) {
       <section class="procurement-card">
         <div class="procurement-card__head">
           <div>
-            <span>СТРУКТУРА</span>
-            <h3>По категориям</h3>
+            <span>СКЛАДЫ</span>
+            <h3>Закупки по складам</h3>
           </div>
         </div>
 
         <div class="procurement-bars">
-          ${(data.categories || []).slice(0, 10).map((row) => `
+          ${stores.slice(0, 10).map((row) => `
             <div class="procurement-bar">
               <div>
                 <strong>${escapeHtml(row.name)}</strong>
-                <span>${money.format(row.value || 0)}</span>
+                <span>${money.format(row.sum || 0)}</span>
               </div>
               <i>
-                <b style="width:${procurementPercent(row.value, total)}%"></b>
+                <b style="width:${summary.sum ? Math.min(100, Number(row.sum || 0) / Number(summary.sum || 1) * 100) : 0}%"></b>
               </i>
             </div>
           `).join('')}
         </div>
       </section>
     </div>
-
-    <section class="procurement-card">
-      <div class="procurement-card__head">
-        <div>
-          <span>СКЛАДЫ</span>
-          <h3>Закупки по складам</h3>
-        </div>
-      </div>
-
-      <div class="procurement-store-grid">
-        ${(data.stores || [])
-          .filter((row) => Number(row.value || 0) > 0)
-          .map((row) => `
-            <div>
-              <span>${escapeHtml(row.name)}</span>
-              <strong>${money.format(row.value || 0)}</strong>
-              <small>${fmt.format(row.products || 0)} позиций</small>
-            </div>
-          `).join('')}
-      </div>
-    </section>
   `;
 }
 
-function renderProcurementPrices(data) {
-  const rows = procurementRows()
-    .filter((row) => Number.isFinite(Number(row.averagePrice)))
-    .slice(0, 100);
+function renderIncomingJournal(data) {
+  const rows = incomingDocumentRows();
 
   return `
-    <section class="procurement-card">
+    <section class="procurement-card incoming-journal">
       <div class="procurement-card__head">
         <div>
-          <span>РАСЧЁТ ИЗ ОСВ</span>
-          <h3>Средневзвешенная закупочная цена за период</h3>
+          <span>ПРИХОДНЫЕ НАКЛАДНЫЕ</span>
+          <h3>${fmt.format(rows.length)} документов</h3>
         </div>
+
+        <small class="incoming-real-badge">
+          iikoOffice
+        </small>
       </div>
 
-      <div class="procurement-note">
-        Это <strong>средняя цена за выбранный период</strong>,
-        рассчитанная как сумма прихода / количество прихода.
-        Это пока не «последняя цена накладной».
+      <div class="incoming-table incoming-table--head">
+        <span>Дата</span>
+        <span>№ iiko / поставщика</span>
+        <span>Склад</span>
+        <span>Поставщик</span>
+        <span>Сумма</span>
+        <span></span>
       </div>
 
-      <div class="procurement-price-table">
-        ${rows.map((row) => `
-          <div class="procurement-price-row">
-            <div>
-              <strong>${escapeHtml(row.name)}</strong>
-              <small>${escapeHtml(row.code || '')} · ${escapeHtml(row.category || '')}</small>
-            </div>
-            <div>
-              <strong>${procurementAveragePrice(row)}</strong>
-              <small>${money.format(row.value || 0)} закуплено</small>
-            </div>
+      <div class="incoming-list">
+        ${rows.length ? rows.map((row) => `
+          <button
+            type="button"
+            class="incoming-table incoming-document-row"
+            data-incoming-document="${escapeHtml(row.id)}"
+          >
+            <span data-label="Дата">
+              ${documentDateLabel(row.date)}
+            </span>
+
+            <span data-label="№">
+              <strong>${escapeHtml(row.number || '—')}</strong>
+              <small>${escapeHtml(row.invoiceIncomingNumber || '—')}</small>
+            </span>
+
+            <span data-label="Склад">
+              ${escapeHtml(row.stores?.map((store) => store.name).join(', ') || '—')}
+            </span>
+
+            <span data-label="Поставщик">
+              <strong>${row.supplierId ? `ID ${escapeHtml(shortUuid(row.supplierId))}` : '—'}</strong>
+              <small>название подключим из справочника</small>
+            </span>
+
+            <span data-label="Сумма">
+              <strong>${money.format(row.sum || 0)}</strong>
+              ${row.hasDifference ? `<small class="incoming-difference">есть отклонение цены</small>` : ''}
+            </span>
+
+            <span class="incoming-arrow">›</span>
+          </button>
+        `).join('') : `
+          <div class="dashboard-empty">
+            Нет приходных накладных за выбранный период.
           </div>
-        `).join('')}
+        `}
       </div>
     </section>
   `;
 }
 
-function renderProcurementFuture(kind) {
-  const texts = {
-    documents: {
-      title: 'Приходные накладные',
-      text:
-        'Здесь будет журнал реальных документов: номер, дата, поставщик, склад, сумма и строки накладной.'
-    },
-    suppliers: {
-      title: 'Поставщики',
-      text:
-        'Здесь появятся рейтинг поставщиков, доля закупок, отклонение от лучшей цены и потенциальная переплата.'
-    },
-    matrix: {
-      title: 'Матрица закупочных цен',
-      text:
-        'Матрица будет строиться на выбранную дату: последняя известная цена каждого поставщика не позднее этой даты.'
-    }
-  };
-
-  const item = texts[kind] || texts.documents;
-
+function renderExactPricesInfo() {
   return `
     <section class="procurement-card procurement-future">
-      <span>СЛЕДУЮЩИЙ ИСТОЧНИК ДАННЫХ</span>
-      <h3>${escapeHtml(item.title)}</h3>
-      <p>${escapeHtml(item.text)}</p>
+      <span>РЕАЛЬНЫЕ ЦЕНЫ УЖЕ ПОДКЛЮЧЕНЫ</span>
+      <h3>Цена каждой строки берётся из накладной</h3>
+      <p>
+        Открой любую приходную накладную: внутри уже показываются
+        фактические количество, цена, сумма и НДС из
+        <strong>getAbstractDocument</strong>.
+      </p>
 
       <div class="procurement-future-list">
-        <div>✓ Интерфейс и структура аналитики уже определены</div>
-        <div>✓ ОСВ и закупочное движение берём из iikoOffice</div>
-        <div>→ Нужен один Fiddler-захват открытия приходных накладных в iikoOffice</div>
+        <div>✓ Цена строки — реальная цена документа</div>
+        <div>✓ Количество и сумма — из iikoOffice</div>
+        <div>✓ Код и товар сопоставляются с номенклатурой</div>
+        <div>→ Следом соберём историю цены товара по накладным</div>
+      </div>
+    </section>
+  `;
+}
+
+function renderSupplierFuture() {
+  return `
+    <section class="procurement-card procurement-future">
+      <span>ПОСТАВЩИКИ</span>
+      <h3>UUID поставщика уже приходит в каждой накладной</h3>
+      <p>
+        Сейчас мы намеренно не придумываем названия.
+        Нужен вызов справочника контрагентов iikoOffice,
+        чтобы сопоставить UUID с настоящим названием поставщика.
+      </p>
+
+      <div class="procurement-future-list">
+        <div>✓ Поставщик связан с каждой реальной накладной</div>
+        <div>✓ Уже можно считать число поставщиков</div>
+        <div>→ После справочника появятся названия и рейтинг</div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMatrixFuture() {
+  return `
+    <section class="procurement-card procurement-future">
+      <span>МАТРИЦА</span>
+      <h3>Основа для матрицы уже есть</h3>
+      <p>
+        Для каждой открытой накладной получаем товар, поставщика,
+        дату и фактическую цену. Следующий этап — собрать историю
+        строк и выбирать последнюю цену поставщика не позднее
+        выбранной даты.
+      </p>
+
+      <div class="procurement-future-list">
+        <div>✓ Документы и даты</div>
+        <div>✓ Поставщик UUID</div>
+        <div>✓ Товар UUID и код</div>
+        <div>✓ Фактическая цена строки</div>
       </div>
     </section>
   `;
@@ -1560,7 +1683,7 @@ function renderDocuments() {
     showDates: true
   });
 
-  const data = state.procurement;
+  const data = state.incomingDocuments;
 
   if (!data) {
     loadDocuments();
@@ -1568,9 +1691,9 @@ function renderDocuments() {
   }
 
   const tabs = [
+    ['documents', 'Приходные'],
     ['overview', 'Обзор'],
     ['prices', 'Цены'],
-    ['documents', 'Документы'],
     ['suppliers', 'Поставщики'],
     ['matrix', 'Матрица']
   ];
@@ -1578,13 +1701,15 @@ function renderDocuments() {
   let body = '';
 
   if (state.procurementTab === 'overview') {
-    body = renderProcurementOverview(data);
+    body = renderIncomingOverview(data);
   } else if (state.procurementTab === 'prices') {
-    body = renderProcurementPrices(data);
+    body = renderExactPricesInfo();
+  } else if (state.procurementTab === 'suppliers') {
+    body = renderSupplierFuture();
+  } else if (state.procurementTab === 'matrix') {
+    body = renderMatrixFuture();
   } else {
-    body = renderProcurementFuture(
-      state.procurementTab
-    );
+    body = renderIncomingJournal(data);
   }
 
   metrics([]);
@@ -1593,16 +1718,16 @@ function renderDocuments() {
     <div class="procurement-header">
       <div>
         <span class="dashboard-eyebrow">Документы</span>
-        <h2>Закупки и цены</h2>
+        <h2>Закупки</h2>
         <p>
-          Управленческий слой над документами iikoOffice.
-          Сейчас уже считаем то, что достоверно доступно из ОСВ.
+          Реальные приходные накладные напрямую из iikoOffice.
+          Никаких тестовых или восстановленных документов.
         </p>
       </div>
 
       <div class="procurement-total">
         <span>Закупки за период</span>
-        <strong>${money.format(data.summary?.purchaseValue || 0)}</strong>
+        <strong>${money.format(data.summary?.sum || 0)}</strong>
       </div>
     </div>
 
@@ -1618,15 +1743,8 @@ function renderDocuments() {
 
     ${body}
 
-    ${(data.failedStores || []).length ? `
-      <div class="dashboard-warning">
-        Не удалось получить ОСВ по ${data.failedStores.length} складам.
-      </div>
-    ` : ''}
-
     <div class="dashboard-source">
       ${escapeHtml(data.source || 'iikoOffice')}
-      · ${data.cache?.cached ? 'кэш' : `${fmt.format(data.performance?.totalMs || 0)} мс`}
     </div>
   `;
 
@@ -1637,6 +1755,183 @@ function renderDocuments() {
       renderDocuments();
     });
   });
+
+  $$('[data-incoming-document]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openIncomingDocument(
+        button.dataset.incomingDocument
+      );
+    });
+  });
+}
+
+async function openIncomingDocument(documentId) {
+  const row =
+    state.incomingDocuments?.documents?.find(
+      (item) => item.id === documentId
+    );
+
+  $('#content').innerHTML = `
+    <div class="documents-loading">
+      <span class="dashboard-spinner"></span>
+      <strong>Открываем накладную ${escapeHtml(row?.number || '')}…</strong>
+      <small>Получаем строки документа из iikoOffice</small>
+    </div>
+  `;
+
+  try {
+    const payload =
+      await apiIncomingDocumentDetail(documentId);
+
+    state.incomingDocumentDetail = payload;
+    renderIncomingDocumentDetail(payload);
+  } catch (error) {
+    $('#content').innerHTML = `
+      <div class="document-detail-error">
+        <button
+          type="button"
+          class="document-back"
+          id="documentBackBtn"
+        >← Назад к накладным</button>
+
+        <div class="empty-state">
+          <strong>Не удалось открыть накладную</strong>
+          ${escapeHtml(error.message)}
+        </div>
+      </div>
+    `;
+
+    $('#documentBackBtn')?.addEventListener(
+      'click',
+      renderDocuments
+    );
+  }
+}
+
+function renderIncomingDocumentDetail(payload) {
+  const doc = payload.document || {};
+  const items = doc.items || [];
+
+  configureMainControls({
+    showStore: false,
+    showSearch: false,
+    showBalanceFilters: false,
+    showDates: false
+  });
+
+  $('#content').innerHTML = `
+    <div class="incoming-detail">
+      <div class="incoming-detail__top">
+        <button
+          type="button"
+          class="document-back"
+          id="documentBackBtn"
+        >← Приходные</button>
+
+        <span class="incoming-real-badge">
+          iikoOffice · read-only
+        </span>
+      </div>
+
+      <div class="incoming-detail__header">
+        <div>
+          <span>ПРИХОДНАЯ НАКЛАДНАЯ</span>
+          <h2>${escapeHtml(doc.number || 'Без номера')}</h2>
+          <p>
+            ${documentDateTimeLabel(doc.date)}
+            ${doc.invoice ? ` · Входящий № ${escapeHtml(doc.invoice)}` : ''}
+          </p>
+        </div>
+
+        <div class="incoming-detail__total">
+          <span>Сумма</span>
+          <strong>${money.format(doc.total || 0)}</strong>
+        </div>
+      </div>
+
+      <div class="incoming-detail__meta">
+        <div>
+          <span>Склад</span>
+          <strong>${escapeHtml(doc.storeName || '—')}</strong>
+        </div>
+
+        <div>
+          <span>Поставщик</span>
+          <strong>${doc.supplierId ? `ID ${escapeHtml(shortUuid(doc.supplierId))}` : '—'}</strong>
+          <small>UUID из документа</small>
+        </div>
+
+        <div>
+          <span>Статус</span>
+          <strong>${doc.status === 'PROCESSED' ? 'Проведён' : escapeHtml(doc.status || '—')}</strong>
+        </div>
+
+        <div>
+          <span>Позиций</span>
+          <strong>${fmt.format(items.length)}</strong>
+        </div>
+      </div>
+
+      <section class="procurement-card incoming-detail__items">
+        <div class="procurement-card__head">
+          <div>
+            <span>СТРОКИ ДОКУМЕНТА</span>
+            <h3>Товары</h3>
+          </div>
+        </div>
+
+        <div class="incoming-item-table incoming-item-table--head">
+          <span>Товар</span>
+          <span>Количество</span>
+          <span>Цена</span>
+          <span>НДС</span>
+          <span>Сумма</span>
+        </div>
+
+        <div>
+          ${items.map((item) => `
+            <div class="incoming-item-table">
+              <span data-label="Товар">
+                <strong>${escapeHtml(item.productName || item.productId || '—')}</strong>
+                <small>${escapeHtml(item.productNum || item.code || '')}</small>
+              </span>
+
+              <span data-label="Количество">
+                <strong>${fmt.format(item.amount || 0)}</strong>
+                <small>${escapeHtml(item.unit || '')}</small>
+              </span>
+
+              <span data-label="Цена">
+                <strong>${money.format(item.price || 0)}</strong>
+                ${item.priceWithoutNds !== item.price ? `<small>без НДС ${money.format(item.priceWithoutNds || 0)}</small>` : ''}
+              </span>
+
+              <span data-label="НДС">
+                ${fmt.format(item.ndsPercent || 0)}%
+              </span>
+
+              <span data-label="Сумма">
+                <strong>${money.format(item.sum || 0)}</strong>
+              </span>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+
+      <div class="dashboard-source">
+        ${escapeHtml(payload.source || 'iikoOffice')}
+        · ID ${escapeHtml(doc.id || '')}
+      </div>
+    </div>
+  `;
+
+  $('#documentBackBtn')?.addEventListener(
+    'click',
+    () => {
+      state.incomingDocumentDetail = null;
+      renderDocuments();
+    }
+  );
 }
 
 function bindDocumentFilters() {
@@ -3110,6 +3405,7 @@ $$('.menu-item').forEach((button) => {
 $('#refreshBtn').addEventListener('click', () => {
   if (state.tab === 'documents') {
     state.procurement = null;
+    state.incomingDocuments = null;
     loadDocuments({ forceRefresh: true });
   } else if (state.tab === 'dishes') {
     state.dishes = [];
@@ -3189,6 +3485,7 @@ $('#dateFrom').addEventListener('change', (event) => {
   state.from = event.target.value;
   if (state.tab === 'documents') {
     state.procurement = null;
+    state.incomingDocuments = null;
     loadDocuments();
   } else if (state.tab === 'turnover') {
     state.turnoverRows = [];
