@@ -84,8 +84,8 @@ function setAuthError(message = '') {
 }
 
 function showAuthGate(message = '') {
-  document.body.classList.add('auth-pending');
-  document.body.classList.remove('authenticated');
+  document.body.classList.remove('auth-pending');
+  document.body.classList.add('authenticated');
   $('#authGate').hidden = false;
   if (message) {
     $('#authHint').textContent = message;

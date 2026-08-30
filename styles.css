@@ -3625,3 +3625,19 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* v71 — authentication screen temporarily disabled */
+#authGate,
+.auth-gate,
+body.auth-pending #authGate,
+body.auth-pending .auth-gate {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+body,
+body.auth-pending,
+body.authenticated {
+  overflow: auto !important;
+}
