@@ -14,8 +14,7 @@ function telegramInitData() {
 }
 
 function permissionGranted(permission) {
-  const permissions = authState.me?.permissions || [];
-  return permissions.includes('*') || permissions.includes(permission);
+  return true;
 }
 
 async function publicApi(path, options = {}) {
@@ -45,24 +44,10 @@ async function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set('Accept', headers.get('Accept') || 'application/json');
 
-  if (authState.token) {
-    headers.set('Authorization', `Bearer ${authState.token}`);
-  }
-
-  if (authState.connectionId) {
-    headers.set('X-Connection-ID', authState.connectionId);
-  }
-
-  const response = await fetch(url, {
+  return fetch(url, {
     ...options,
     headers
   });
-
-  if (response.status === 401) {
-    showAuthGate('Сессия закончилась. Войдите снова.');
-  }
-
-  return response;
 }
 
 function saveAuth(token, me) {
@@ -582,7 +567,7 @@ let LIVE_STORES = [
 
 
 const state = {
-  tab: 'balances',
+  tab: 'documents',
   data: {
     stores: LIVE_STORES,
     products: [],
@@ -607,6 +592,8 @@ const state = {
   lastUpdatedAt: null,
   documents: [],
   documentsLoading: false,
+  procurement: null,
+  procurementTab: 'overview',
   documentDetail: null,
   documentDetailLoading: false,
   documentTypeFilter: 'all',
@@ -1265,46 +1252,304 @@ function renderBalanceRow(row) {
   `;
 }
 
-async function loadDocuments({ forceRefresh = false } = {}) {
-  state.documentsLoading = false;
-  configureMainControls({
-    showStore: false,
-    showBalanceFilters: false,
-    showDates: false
-  });
-  metrics([]);
-  $('#connectionStatus').textContent = 'iikoOffice · раздел готовим';
-  $('#content').innerHTML = `
-    <div class="empty-state">
-      <strong>Документы переводим на iikoOffice</strong>
-      Старую интеграцию с iikoWeb отключили. Следующий захват Fiddler подключим напрямую к iikoOffice.
-    </div>
-  `;
-}
-
-function filteredDocuments() {
-  let docs = state.documents.filter((doc) => matches(
-    doc.documentNumber,
-    ruDocumentType(doc),
-    ruDocumentStatus(doc),
-    doc.comment,
-    documentStorageLabel(doc)
-  ));
-
-  if (state.documentTypeFilter !== 'all') {
-    docs = docs.filter((doc) => doc.type === state.documentTypeFilter);
+async function apiProcurement({ forceRefresh = false } = {}) {
+  if (!state.from || !state.to) {
+    setDefaultDates();
   }
 
-  if (state.storeId) {
-    docs = docs.filter((doc) =>
-      [doc.storage, doc.storageFrom, doc.storageTo]
-        .some((id) => String(id || '') === String(state.storeId))
+  const params = new URLSearchParams({
+    from: state.from,
+    to: state.to,
+    storeId: state.storeId || '__ALL__'
+  });
+
+  if (forceRefresh) {
+    params.set('_', String(Date.now()));
+  }
+
+  const response = await apiFetch(
+    `${cfg.workerUrl}/api/purchases-summary?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store'
+    }
+  );
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(
+      payload.error || `HTTP ${response.status}`
     );
   }
 
-  return docs.sort((a, b) =>
-    String(b.dateIncoming || '').localeCompare(String(a.dateIncoming || ''))
+  return payload;
+}
+
+async function loadDocuments({ forceRefresh = false } = {}) {
+  if (state.documentsLoading) return;
+
+  state.documentsLoading = true;
+
+  configureMainControls({
+    showStore: true,
+    showSearch: true,
+    showBalanceFilters: false,
+    showDates: true
+  });
+
+  metrics([]);
+
+  $('#connectionStatus').textContent =
+    'iikoOffice · закупочная аналитика';
+
+  $('#content').innerHTML = `
+    <div class="documents-loading">
+      <span class="dashboard-spinner"></span>
+      <strong>Собираем закупки…</strong>
+      <small>На основе приходного движения iikoOffice</small>
+    </div>
+  `;
+
+  try {
+    state.procurement =
+      await apiProcurement({ forceRefresh });
+    renderDocuments();
+  } catch (error) {
+    $('#content').innerHTML = `
+      <div class="empty-state">
+        <strong>Не удалось собрать закупки</strong>
+        ${escapeHtml(error.message)}
+      </div>
+    `;
+  } finally {
+    state.documentsLoading = false;
+  }
+}
+
+function procurementRows() {
+  const rows =
+    state.procurement?.products || [];
+
+  if (!state.query) return rows;
+
+  const query =
+    state.query.toLocaleLowerCase('ru-RU');
+
+  return rows.filter((row) =>
+    [
+      row.name,
+      row.code,
+      row.category,
+      ...(row.stores || [])
+    ]
+      .join(' ')
+      .toLocaleLowerCase('ru-RU')
+      .includes(query)
   );
+}
+
+function procurementAveragePrice(row) {
+  const price = Number(row.averagePrice);
+  if (!Number.isFinite(price)) return '—';
+
+  return `${money.format(price)} / ${escapeHtml(row.unit || 'ед.')}`;
+}
+
+function procurementPercent(value, total) {
+  const n = Number(value || 0);
+  const t = Number(total || 0);
+  if (t <= 0) return 0;
+  return Math.max(0, Math.min(100, n / t * 100));
+}
+
+function renderProcurementOverview(data) {
+  const summary = data.summary || {};
+  const total = Number(summary.purchaseValue || 0);
+  const rows = procurementRows();
+
+  const top = rows.slice(0, 12);
+
+  return `
+    <div class="procurement-kpis">
+      <article>
+        <span>Закуплено</span>
+        <strong>${money.format(total)}</strong>
+        <small>${escapeHtml(data.period?.from || '')} — ${escapeHtml(data.period?.to || '')}</small>
+      </article>
+
+      <article>
+        <span>Товарных позиций</span>
+        <strong>${fmt.format(summary.productCount || 0)}</strong>
+        <small>с приходным движением</small>
+      </article>
+
+      <article>
+        <span>Складов</span>
+        <strong>${fmt.format(summary.storeCount || 0)}</strong>
+        <small>с закупками</small>
+      </article>
+
+      <article>
+        <span>Категорий</span>
+        <strong>${fmt.format(summary.categoryCount || 0)}</strong>
+        <small>в закупках</small>
+      </article>
+    </div>
+
+    <div class="procurement-grid">
+      <section class="procurement-card">
+        <div class="procurement-card__head">
+          <div>
+            <span>ТОП</span>
+            <h3>Закупки по товарам</h3>
+          </div>
+        </div>
+
+        <div class="procurement-product-list">
+          ${top.length ? top.map((row, index) => `
+            <div class="procurement-product">
+              <b>${index + 1}</b>
+              <div>
+                <strong>${escapeHtml(row.name)}</strong>
+                <small>
+                  ${escapeHtml(row.code || '')}
+                  ${row.category ? ` · ${escapeHtml(row.category)}` : ''}
+                </small>
+              </div>
+              <div>
+                <strong>${money.format(row.value || 0)}</strong>
+                <small>
+                  ${fmt.format(row.quantity || 0)}
+                  ${escapeHtml(row.unit || '')}
+                </small>
+              </div>
+            </div>
+          `).join('') : `
+            <div class="dashboard-empty">Нет закупок за период</div>
+          `}
+        </div>
+      </section>
+
+      <section class="procurement-card">
+        <div class="procurement-card__head">
+          <div>
+            <span>СТРУКТУРА</span>
+            <h3>По категориям</h3>
+          </div>
+        </div>
+
+        <div class="procurement-bars">
+          ${(data.categories || []).slice(0, 10).map((row) => `
+            <div class="procurement-bar">
+              <div>
+                <strong>${escapeHtml(row.name)}</strong>
+                <span>${money.format(row.value || 0)}</span>
+              </div>
+              <i>
+                <b style="width:${procurementPercent(row.value, total)}%"></b>
+              </i>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+    </div>
+
+    <section class="procurement-card">
+      <div class="procurement-card__head">
+        <div>
+          <span>СКЛАДЫ</span>
+          <h3>Закупки по складам</h3>
+        </div>
+      </div>
+
+      <div class="procurement-store-grid">
+        ${(data.stores || [])
+          .filter((row) => Number(row.value || 0) > 0)
+          .map((row) => `
+            <div>
+              <span>${escapeHtml(row.name)}</span>
+              <strong>${money.format(row.value || 0)}</strong>
+              <small>${fmt.format(row.products || 0)} позиций</small>
+            </div>
+          `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderProcurementPrices(data) {
+  const rows = procurementRows()
+    .filter((row) => Number.isFinite(Number(row.averagePrice)))
+    .slice(0, 100);
+
+  return `
+    <section class="procurement-card">
+      <div class="procurement-card__head">
+        <div>
+          <span>РАСЧЁТ ИЗ ОСВ</span>
+          <h3>Средневзвешенная закупочная цена за период</h3>
+        </div>
+      </div>
+
+      <div class="procurement-note">
+        Это <strong>средняя цена за выбранный период</strong>,
+        рассчитанная как сумма прихода / количество прихода.
+        Это пока не «последняя цена накладной».
+      </div>
+
+      <div class="procurement-price-table">
+        ${rows.map((row) => `
+          <div class="procurement-price-row">
+            <div>
+              <strong>${escapeHtml(row.name)}</strong>
+              <small>${escapeHtml(row.code || '')} · ${escapeHtml(row.category || '')}</small>
+            </div>
+            <div>
+              <strong>${procurementAveragePrice(row)}</strong>
+              <small>${money.format(row.value || 0)} закуплено</small>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderProcurementFuture(kind) {
+  const texts = {
+    documents: {
+      title: 'Приходные накладные',
+      text:
+        'Здесь будет журнал реальных документов: номер, дата, поставщик, склад, сумма и строки накладной.'
+    },
+    suppliers: {
+      title: 'Поставщики',
+      text:
+        'Здесь появятся рейтинг поставщиков, доля закупок, отклонение от лучшей цены и потенциальная переплата.'
+    },
+    matrix: {
+      title: 'Матрица закупочных цен',
+      text:
+        'Матрица будет строиться на выбранную дату: последняя известная цена каждого поставщика не позднее этой даты.'
+    }
+  };
+
+  const item = texts[kind] || texts.documents;
+
+  return `
+    <section class="procurement-card procurement-future">
+      <span>СЛЕДУЮЩИЙ ИСТОЧНИК ДАННЫХ</span>
+      <h3>${escapeHtml(item.title)}</h3>
+      <p>${escapeHtml(item.text)}</p>
+
+      <div class="procurement-future-list">
+        <div>✓ Интерфейс и структура аналитики уже определены</div>
+        <div>✓ ОСВ и закупочное движение берём из iikoOffice</div>
+        <div>→ Нужен один Fiddler-захват открытия приходных накладных в iikoOffice</div>
+      </div>
+    </section>
+  `;
 }
 
 function renderDocuments() {
@@ -1315,88 +1560,81 @@ function renderDocuments() {
     showDates: true
   });
 
-  const docs = filteredDocuments();
-  const total = docs.reduce((sum, doc) => sum + Number(doc.sum || 0), 0);
-  const posted = docs.filter((doc) => doc.status === 'PROCESSED').length;
-  const types = new Set(docs.map((doc) => doc.type).filter(Boolean)).size;
+  const data = state.procurement;
 
-  metrics([
-    ['Документов', fmt.format(docs.length)],
-    ['Проведено', fmt.format(posted)],
-    ['Типов', fmt.format(types)],
-    ['Сумма', money.format(total)]
-  ]);
-
-  const typeOptions = [
-    ['all', 'Все'],
-    ['WRITEOFF_DOCUMENT', 'Списания'],
-    ['SALES_DOCUMENT', 'Продажи'],
-    ['INCOMING_INVOICE', 'Приход'],
-    ['OUTGOING_INVOICE', 'Расход'],
-    ['INTERNAL_TRANSFER', 'Перемещения']
-  ];
-
-  if (!docs.length) {
-    $('#content').innerHTML = `
-      <div class="document-toolbar">
-        <div class="filter-chips">
-          ${typeOptions.map(([value, label]) => `
-            <button class="filter-chip ${state.documentTypeFilter === value ? 'active' : ''}"
-              type="button" data-doc-filter="${escapeHtml(value)}">${escapeHtml(label)}</button>
-          `).join('')}
-        </div>
-      </div>
-      <div class="empty-state">
-        <strong>Документы не найдены</strong>
-        Попробуйте изменить период, склад, поиск или тип документа.
-      </div>
-    `;
-    bindDocumentFilters();
+  if (!data) {
+    loadDocuments();
     return;
   }
 
+  const tabs = [
+    ['overview', 'Обзор'],
+    ['prices', 'Цены'],
+    ['documents', 'Документы'],
+    ['suppliers', 'Поставщики'],
+    ['matrix', 'Матрица']
+  ];
+
+  let body = '';
+
+  if (state.procurementTab === 'overview') {
+    body = renderProcurementOverview(data);
+  } else if (state.procurementTab === 'prices') {
+    body = renderProcurementPrices(data);
+  } else {
+    body = renderProcurementFuture(
+      state.procurementTab
+    );
+  }
+
+  metrics([]);
+
   $('#content').innerHTML = `
-    <div class="document-toolbar">
-      <div class="filter-chips">
-        ${typeOptions.map(([value, label]) => `
-          <button class="filter-chip ${state.documentTypeFilter === value ? 'active' : ''}"
-            type="button" data-doc-filter="${escapeHtml(value)}">${escapeHtml(label)}</button>
-        `).join('')}
+    <div class="procurement-header">
+      <div>
+        <span class="dashboard-eyebrow">Документы</span>
+        <h2>Закупки и цены</h2>
+        <p>
+          Управленческий слой над документами iikoOffice.
+          Сейчас уже считаем то, что достоверно доступно из ОСВ.
+        </p>
+      </div>
+
+      <div class="procurement-total">
+        <span>Закупки за период</span>
+        <strong>${money.format(data.summary?.purchaseValue || 0)}</strong>
       </div>
     </div>
 
-    <div class="documents-list">
-      ${docs.map((doc) => `
-        <button class="document-row" type="button"
-          data-document-id="${escAttr(doc.id)}"
-          data-document-type="${escAttr(doc.type)}">
-          <div class="document-row__main">
-            <div class="document-row__title">
-              ${escapeHtml(ruDocumentType(doc))}
-              <span>№${escapeHtml(doc.documentNumber || '—')}</span>
-            </div>
-            <div class="document-row__meta">
-              ${escapeHtml(formatDocumentDate(doc.dateIncoming))}
-              · ${escapeHtml(documentStorageLabel(doc))}
-            </div>
-            ${doc.comment ? `<div class="document-row__comment">${escapeHtml(doc.comment)}</div>` : ''}
-          </div>
-
-          <div class="document-row__right">
-            <strong>${money.format(doc.sum || 0)}</strong>
-            <span class="status-badge">${escapeHtml(ruDocumentStatus(doc))}</span>
-            <span class="document-row__arrow">›</span>
-          </div>
-        </button>
+    <div class="procurement-tabs">
+      ${tabs.map(([value, label]) => `
+        <button
+          type="button"
+          class="${state.procurementTab === value ? 'active' : ''}"
+          data-procurement-tab="${value}"
+        >${escapeHtml(label)}</button>
       `).join('')}
+    </div>
+
+    ${body}
+
+    ${(data.failedStores || []).length ? `
+      <div class="dashboard-warning">
+        Не удалось получить ОСВ по ${data.failedStores.length} складам.
+      </div>
+    ` : ''}
+
+    <div class="dashboard-source">
+      ${escapeHtml(data.source || 'iikoOffice')}
+      · ${data.cache?.cached ? 'кэш' : `${fmt.format(data.performance?.totalMs || 0)} мс`}
     </div>
   `;
 
-  bindDocumentFilters();
-
-  $$('.document-row').forEach((button) => {
+  $$('[data-procurement-tab]').forEach((button) => {
     button.addEventListener('click', () => {
-      openDocument(button.dataset.documentId, button.dataset.documentType);
+      state.procurementTab =
+        button.dataset.procurementTab;
+      renderDocuments();
     });
   });
 }
@@ -2871,7 +3109,7 @@ $$('.menu-item').forEach((button) => {
 
 $('#refreshBtn').addEventListener('click', () => {
   if (state.tab === 'documents') {
-    state.documents = [];
+    state.procurement = null;
     loadDocuments({ forceRefresh: true });
   } else if (state.tab === 'dishes') {
     state.dishes = [];
@@ -2950,7 +3188,7 @@ $$('[data-balance-filter]').forEach((button) => {
 $('#dateFrom').addEventListener('change', (event) => {
   state.from = event.target.value;
   if (state.tab === 'documents') {
-    state.documents = [];
+    state.procurement = null;
     loadDocuments();
   } else if (state.tab === 'turnover') {
     state.turnoverRows = [];
@@ -3121,17 +3359,43 @@ $('#logoutBtn').addEventListener('click', async () => {
 
 (async () => {
   try {
-    const ready = await initializeAuth();
-    if (ready) {
-      await finishAuthorizedStartup();
-    }
+    // Authentication is intentionally paused until the product sections are complete.
+    hideAuthGate();
+    document.body.classList.add('authenticated');
+
+    authState.me = {
+      user: { name: 'Разработка' },
+      role: 'OWNER',
+      roleLabel: 'Разработка',
+      permissions: ['*'],
+      connections: []
+    };
+
+    setDefaultDates();
+    fillStores();
+    applyPermissions();
+
+    $('#connectionBtn').hidden = true;
+    $('#connectionStatus').textContent = 'ТС — Сургут · iikoOffice';
+
+    render();
   } catch (error) {
-    showAuthGate(error.message);
-    setAuthError(error.message);
+    $('#content').innerHTML = `
+      <div class="empty-state">
+        <strong>Ошибка запуска</strong>
+        ${escapeHtml(error.message)}
+      </div>
+    `;
   }
 })();
 
 
 window.addEventListener('resize', () => {
   relocateContextControls();
+});
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const connectionButton = document.querySelector('#connectionBtn');
+  if (connectionButton) connectionButton.hidden = true;
 });
